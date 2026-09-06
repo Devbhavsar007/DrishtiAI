@@ -38,37 +38,37 @@
 ```mermaid
 graph TD
     subgraph Client["Frontend Client (React + Vite)"]
-        UI[Accessibility-First UI]
-        LateralityToggle[Laterality Selector OD/OS]
-        DemoPanel[Red-Team Simulator 10 Scenarios]
-        Triptych[Explainability Triptych]
-        Audio[Multilingual Speech Engine]
+        UI["Accessibility-First UI"]
+        LateralityToggle["Laterality Selector OD/OS"]
+        DemoPanel["Red-Team Simulator 10 Scenarios"]
+        Triptych["Explainability Triptych"]
+        Audio["Multilingual Speech Engine"]
     end
 
     subgraph Gateway["API & Session Boundary"]
-        SessionBind[/api/sessions/bind]
-        IngestGate[/api/ingest/validate]
-        HealthProbes[/api/health & /ready]
+        SessionBind["/api/sessions/bind"]
+        IngestGate["/api/ingest/validate"]
+        HealthProbes["/api/health & /ready"]
     end
 
     subgraph Core["Hardened Safety Core"]
-        ImgValidator[ImageValidator Decompress/Bomb/Hash]
-        Anatomy[Anatomy Engine Disc/Fovea/Laterality]
-        OOD[OOD Pipeline Domain Shift]
-        StateMachine[Safety State Machine]
+        ImgValidator["ImageValidator (Decompress/Bomb/Hash)"]
+        Anatomy["Anatomy Engine (Disc/Fovea/Laterality)"]
+        OOD["OOD Pipeline (Domain Shift)"]
+        StateMachine["Safety State Machine"]
     end
 
     subgraph Inference["AI Inference Pipeline"]
-        EfficientNet[EfficientNet-B3 Primary]
-        GradCAM[Grad-CAM Saliency]
-        Frangi[Frangi Vessel Segmenter]
-        Gemma[Gemma-4 Clinical LLM]
+        EfficientNet["EfficientNet-B3 Primary"]
+        GradCAM["Grad-CAM Saliency"]
+        Frangi["Frangi Vessel Segmenter"]
+        Gemma["Gemma-4 Clinical LLM"]
     end
 
     subgraph Storage["Resilient Persistence"]
-        DB[(SQLite data.db)]
-        SyncLedger[Offline Outbox Ledger]
-        AuditLog[Immutable Audit Logs]
+        DB[("SQLite DrishtiAI.db")]
+        SyncLedger["Offline Outbox Ledger"]
+        AuditLog["Immutable Audit Logs"]
     end
 
     UI --> Gateway
