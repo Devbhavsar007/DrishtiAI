@@ -57,14 +57,17 @@ else:
 # ---------------------------------------------------------------------------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODELS_DIR = os.path.join(BASE_DIR, "models")
-UPLOAD_DIR = os.path.join(BASE_DIR, "static", "uploads")
-RESULTS_DIR = os.path.join(BASE_DIR, "static", "results")
+UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
+RESULTS_DIR = os.path.join(BASE_DIR, "results")
 
 # Tanwar-12 ResNet50 model
 DR_MODEL_PATH = os.path.join(MODELS_DIR, "model.h5")
 
 # RishiSwethan vessel segmentation model
 VESSEL_MODEL_DIR = os.path.join(MODELS_DIR, "vessel_model")
+PIPELINE_DIR = os.path.join(BASE_DIR, "engine", "pipeline")
+PIPELINE_WEIGHTS = os.path.join(MODELS_DIR, "dr_pipeline", "best_model.pt")
+PIPELINE_CALIBRATION = os.path.join(MODELS_DIR, "dr_pipeline", "calibration.json")
 
 # ---------------------------------------------------------------------------
 # App Settings
@@ -101,11 +104,22 @@ TIER2_TIMEOUT = int(os.getenv("TIER2_TIMEOUT", "30"))
 HIRESCAM_THRESHOLD = float(os.getenv("HIRESCAM_THRESHOLD", "0.4"))
 
 # ---------------------------------------------------------------------------
-# Pipeline Model Paths (new ordinal grading model + calibration)
+# Feature Flags & Policy Versions (Centralized Configuration)
 # ---------------------------------------------------------------------------
-PIPELINE_DIR = os.path.join(MODELS_DIR, "dr_pipeline")
-PIPELINE_WEIGHTS = os.path.join(PIPELINE_DIR, "best_model.pt")
-PIPELINE_CALIBRATION = os.path.join(PIPELINE_DIR, "calibration.json")
+DEMO_MODE = os.getenv("DEMO_MODE", "true").lower() in ("true", "1", "yes")
+ENABLE_OOD = os.getenv("ENABLE_OOD", "true").lower() in ("true", "1", "yes")
+ENABLE_LATERALITY = os.getenv("ENABLE_LATERALITY", "true").lower() in ("true", "1", "yes")
+ENABLE_MULTIMODEL = os.getenv("ENABLE_MULTIMODEL", "true").lower() in ("true", "1", "yes")
+ENABLE_PROGRESSIVE_RISK = os.getenv("ENABLE_PROGRESSIVE_RISK", "true").lower() in ("true", "1", "yes")
+ENABLE_RAG = os.getenv("ENABLE_RAG", "true").lower() in ("true", "1", "yes")
+ENABLE_OFFLINE_SYNC = os.getenv("ENABLE_OFFLINE_SYNC", "true").lower() in ("true", "1", "yes")
+
+SAFETY_POLICY_VERSION = "SAFE-1.0"
+TRIAGE_POLICY_VERSION = "TRIAGE-1.1"
+REPORT_TEMPLATE_VERSION = "REPORT-2.0"
+
+MIN_CONFIDENCE_THRESHOLD = float(os.getenv("MIN_CONFIDENCE_THRESHOLD", "70.0"))
+MODEL_DISAGREEMENT_DELTA = int(os.getenv("MODEL_DISAGREEMENT_DELTA", "2"))
 
 # Ensure directories exist
 for d in [MODELS_DIR, UPLOAD_DIR, RESULTS_DIR, VESSEL_MODEL_DIR, PIPELINE_DIR]:

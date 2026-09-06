@@ -103,7 +103,16 @@ def assess_progression_risk(
 
     uncertainty_flags: list[str] = []
     if prev_stage is None:
+        longitudinal_state = "LIMITED_LONGITUDINAL_HISTORY"
         uncertainty_flags.append("limited longitudinal history")
+        progression_msg = "Progression prediction unavailable: insufficient longitudinal data."
+    elif current_scan.get("stage") is None and current_scan.get("detection") is None:
+        longitudinal_state = "LONGITUDINAL_UNAVAILABLE"
+        progression_msg = "Progression prediction unavailable: current scan data incomplete."
+    else:
+        longitudinal_state = "LONGITUDINAL_SUPPORTED"
+        progression_msg = None
+
     if current_conf < 70.0:
         uncertainty_flags.append("low model confidence")
 
@@ -125,6 +134,9 @@ def assess_progression_risk(
 
     return {
         "engine": "deterministic_progression_v1",
+        "longitudinal_state": longitudinal_state,
+        "progression_availability_message": progression_msg,
+        "is_individualized_prediction": longitudinal_state == "LONGITUDINAL_SUPPORTED",
         "observed_data": {
             "current_stage": current_stage,
             "previous_stage": prev_stage,
@@ -137,6 +149,7 @@ def assess_progression_risk(
             "twelve_month_risk": round(twelve_month, 3),
             "supporting_factors": supporting_factors,
             "uncertainty_flags": uncertainty_flags,
+            "longitudinal_state": longitudinal_state,
         },
         "clinical_recommendation": {
             "follow_up_priority": follow_up_priority,

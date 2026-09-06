@@ -44,7 +44,7 @@ interface MedicalDataContextValue {
   deletePatient: (id: string) => void;
   analyzeScan: (
     patient: Patient,
-    input: { file?: File; preset?: PresetFundusCase }
+    input: { file?: File; preset?: PresetFundusCase; eye?: 'OD' | 'OS'; demoScenario?: any }
   ) => Promise<ScanAnalysis>;
   addToBatchQueue: (item: {
     patient_name: string;
@@ -348,6 +348,19 @@ export const MedicalDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
       const scanResult = buildSyntheticScan(patient.id, patient.name, stage, today, confidence);
       scanResult.images = images;
+      scanResult.eye = input.eye || 'OD';
+
+      if (input.demoScenario) {
+        if (input.demoScenario.safety_evaluation) {
+          scanResult.safety_state = input.demoScenario.safety_evaluation.safety_state;
+          scanResult.automation_level = input.demoScenario.safety_evaluation.automation_level;
+          scanResult.reason_codes = input.demoScenario.safety_evaluation.reason_codes || [];
+        }
+        if (input.demoScenario.progression) {
+          scanResult.longitudinal_state = input.demoScenario.progression.longitudinal_state;
+          scanResult.progression_availability_message = input.demoScenario.progression.progression_availability_message;
+        }
+      }
 
       // Update patient records
       setPatients((prev) =>

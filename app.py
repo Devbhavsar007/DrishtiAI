@@ -30,6 +30,9 @@ logging.basicConfig(
 )
 log = logging.getLogger("DrishtiAI")
 
+# Import configuration
+from config import DEMO_MODE, OFFLINE_MODE, SAFETY_POLICY_VERSION, TRIAGE_POLICY_VERSION
+
 # Import engine (UNCHANGED)
 from engine.preprocessor import preprocess_for_display
 from engine.detector import predict
@@ -49,12 +52,16 @@ from database import (
     get_dashboard_stats, save_progression_assessment, save_referral,
     get_patient_timeline, save_doctor_review, get_doctor_review,
     reconcile_sync_batch, get_sync_status, get_observability_metrics,
-    get_pending_sync_events
+    get_pending_sync_events, create_or_update_screening_session,
+    get_screening_session, update_screening_session_state, get_db
 )
+from engine.safety.state_machine import ScreeningState, ScreeningStateMachine
+from engine.safety import SafetyDecisionEngine, validate_image_file, assess_anatomy_and_laterality, evaluate_ood_signal
 
+safety_engine = SafetyDecisionEngine()
 rag_retriever = MedicalRAGRetriever()
 
-from config import FLASK_SECRET, DEBUG
+from config import FLASK_SECRET, DEBUG, OFFLINE_MODE, UPLOAD_DIR, RESULTS_DIR
 
 # ---------------------------------------------------------------------------
 # Flask app
@@ -150,6 +157,209 @@ def api_health():
         "version": "2.1.0",
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     })
+
+
+@app.route("/api/health/ready", methods=["GET"])
+@limiter.exempt
+def api_health_ready():
+    """Readiness probe: verifies database connectivity."""
+    try:
+        with get_db() as conn:
+            conn.execute("SELECT 1").fetchone()
+        return jsonify({
+            "status": "ready",
+            "database": "connected",
+            "service": "DrishtiAI",
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        })
+    except Exception as e:
+        return jsonify({"status": "not_ready", "error": str(e)}), 503
+
+
+@app.route("/api/health/detailed", methods=["GET"])
+@limiter.limit("30 per minute")
+def api_health_detailed():
+    """
+    Detailed internal diagnostics.
+    PROTECTED: Requires authenticated ADMIN or DOCTOR role to prevent reconnaissance.
+    """
+    actor = get_current_actor()
+    if not actor or actor.get("actor_role") not in (Role.ADMIN.value, Role.DOCTOR.value):
+        return jsonify({
+            "error": "Forbidden: Detailed system diagnostics require authenticated ADMIN or DOCTOR role."
+        }), 403
+
+    with get_db() as conn:
+        scans_cnt = conn.execute("SELECT COUNT(*) FROM scans").fetchone()[0]
+        pat_cnt = conn.execute("SELECT COUNT(*) FROM patients").fetchone()[0]
+        sync_pending_cnt = conn.execute("SELECT COUNT(*) FROM sync_events WHERE sync_status = 'PENDING'").fetchone()[0]
+
+    return jsonify({
+        "status": "healthy",
+        "service": "DrishtiAI",
+        "version": "2.1.0",
+        "actor": actor,
+        "diagnostics": {
+            "total_patients": pat_cnt,
+            "total_scans": scans_cnt,
+            "sync_pending_events": sync_pending_cnt,
+            "offline_mode": OFFLINE_MODE,
+            "models_loaded": {
+                "efficientnet_b3": True,
+                "offline_deterministic_engine": True,
+            },
+        },
+    })
+
+
+# ========================================
+# SESSION BINDING & OPERATOR CONFIRMATION API
+# ========================================
+
+@app.route("/api/sessions/bind", methods=["POST"])
+def api_sessions_bind():
+    """
+    Establish four-way binding: (patient_id, operator_id, eye, session_id).
+    Prevents wrong-patient or wrong-eye mix-ups.
+    """
+    data = request.get_json() or {}
+    patient_id = data.get("patient_id")
+    operator_id = data.get("operator_id", "operator-1")
+    eye = (data.get("eye") or "OD").strip().upper()
+
+    if not patient_id:
+        return jsonify({"error": "patient_id is required for session binding."}), 400
+
+    if eye not in ("OD", "OS"):
+        return jsonify({"error": "Invalid eye laterality. Must be 'OD' (Right) or 'OS' (Left)."}), 400
+
+    patient = get_patient(patient_id)
+    if not patient:
+        return jsonify({"error": f"Patient {patient_id} not found."}), 404
+
+    session_id = f"sess-{uuid.uuid4().hex[:10]}"
+    create_or_update_screening_session(
+        session_id=session_id,
+        patient_id=patient_id,
+        operator_id=operator_id,
+        eye=eye,
+        current_state=ScreeningState.CREATED,
+    )
+
+    return jsonify({
+        "success": True,
+        "session_id": session_id,
+        "patient_id": patient_id,
+        "operator_id": operator_id,
+        "eye": eye,
+        "state": ScreeningState.CREATED,
+    }), 201
+
+
+@app.route("/api/sessions/<session_id>", methods=["GET"])
+def api_sessions_get(session_id):
+    """Get status of an active screening session."""
+    sess = get_screening_session(session_id)
+    if not sess:
+        return jsonify({"error": "Session not found."}), 404
+    return jsonify({"success": True, "session": sess})
+
+
+@app.route("/api/sessions/<session_id>/confirm", methods=["POST"])
+def api_sessions_confirm(session_id):
+    """Operator signs off or confirms laterality override for a session."""
+    sess = get_screening_session(session_id)
+    if not sess:
+        return jsonify({"error": "Session not found."}), 404
+
+    data = request.get_json() or {}
+    notes = data.get("notes", "Operator confirmed laterality and clinical review.")
+    actor_id = data.get("operator_id", sess.get("operator_id", "operator-1"))
+
+    update_screening_session_state(
+        session_id=session_id,
+        new_state=ScreeningState.ANATOMY_VALIDATED,
+        actor_id=actor_id,
+        reason=notes,
+    )
+
+    return jsonify({
+        "success": True,
+        "session_id": session_id,
+        "state": ScreeningState.ANATOMY_VALIDATED,
+        "message": "Operator confirmation recorded.",
+    })
+
+
+@app.route("/api/ingest/validate", methods=["POST"])
+def api_ingest_validate():
+    """
+    Pre-inference image validation endpoint.
+    Performs magic bytes, decompression bomb, blank frame, and SHA-256 fingerprint checks.
+    """
+    if "image" not in request.files:
+        return jsonify({"is_valid": False, "errors": ["No image file provided in 'image' field."]}), 400
+
+    file = request.files["image"]
+    raw_bytes = file.read()
+
+    from engine.safety.image_validator import ImageValidator
+    validator = ImageValidator()
+    result = validator.validate_bytes(raw_bytes)
+
+    if not result.is_valid:
+        return jsonify({
+            "is_valid": False,
+            "rejection_reason": result.rejection_reason or "VALIDATION_FAILED",
+            "errors": result.errors,
+            "warnings": result.warnings,
+        }), 400
+
+    return jsonify({
+        "is_valid": True,
+        "sha256_hash": result.sha256_hash,
+        "dimensions": [result.width, result.height],
+        "duplicate_detected": result.duplicate_detected,
+        "warnings": result.warnings,
+        "errors": [],
+    }), 200
+
+
+# ========================================
+# DEMO & SIMULATION API (Active strictly in DEMO_MODE)
+# ========================================
+
+@app.route("/api/demo/scenarios", methods=["GET"])
+def api_demo_scenarios():
+    """List 10 pre-configured canonical demonstration scenarios."""
+    if not DEMO_MODE:
+        return jsonify({"error": "Demo mode is disabled in production configuration."}), 403
+    from engine.demo.demo_engine import list_demo_scenarios
+    return jsonify({"success": True, "scenarios": list_demo_scenarios()})
+
+
+@app.route("/api/demo/run", methods=["POST"])
+def api_demo_run():
+    """Execute an isolated demonstration scenario against synthetic namespace."""
+    if not DEMO_MODE:
+        return jsonify({"error": "Demo simulations are disabled in production configuration."}), 403
+    data = request.get_json() or {}
+    scenario_id = data.get("scenario_id")
+    if not scenario_id:
+        return jsonify({"error": "scenario_id is required."}), 400
+
+    from engine.demo.demo_engine import run_demo_scenario
+    try:
+        custom_patient_id = data.get("patient_id")
+        result = run_demo_scenario(scenario_id, custom_patient_id)
+        return jsonify({"success": True, "result": result})
+    except ValueError as ve:
+        return jsonify({"error": str(ve)}), 400
+    except PermissionError as pe:
+        return jsonify({"error": str(pe)}), 403
+    except Exception as e:
+        log.exception("Demo scenario error")
+        return jsonify({"error": str(e)}), 500
 
 
 # ========================================

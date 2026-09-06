@@ -30,15 +30,20 @@ def _load_pytorch_model():
         _active_model_type = 'pytorch'
         return _pytorch_model
 
-    if not os.path.exists(PYTORCH_MODEL_PATH):
-        print("[WARNING] EfficientNet-B3 model not found at {}".format(PYTORCH_MODEL_PATH))
-        return None
+    model_path = PYTORCH_MODEL_PATH
+    if not os.path.exists(model_path):
+        alt_path = os.path.join(os.path.dirname(DR_MODEL_PATH), 'dr_pipeline', 'best_model.pt')
+        if os.path.exists(alt_path):
+            model_path = alt_path
+        else:
+            print("[WARNING] EfficientNet-B3 model not found at {}".format(PYTORCH_MODEL_PATH))
+            return None
 
     try:
         import torch
 
-        print("[MODEL] Loading EfficientNet-B3 from {}...".format(PYTORCH_MODEL_PATH))
-        state_dict = torch.load(PYTORCH_MODEL_PATH, map_location='cpu', weights_only=False)
+        print("[MODEL] Loading EfficientNet-B3 from {}...".format(model_path))
+        state_dict = torch.load(model_path, map_location='cpu', weights_only=False)
 
         # Handle checkpoint wrapper (from train_model.py)
         if isinstance(state_dict, dict) and 'model_state_dict' in state_dict:

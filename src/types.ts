@@ -169,6 +169,12 @@ export interface ScanAnalysis {
     heatmap: string;
     vessels: string;
   };
+  eye?: 'OD' | 'OS';
+  safety_state?: 'VERIFIED' | 'UNCERTAIN' | 'BLOCKED' | 'REJECTED';
+  automation_level?: 'AUTOMATED_ASSISTANCE' | 'HUMAN_REVIEW_REQUIRED' | 'HUMAN_CONFIRMED' | 'UNABLE_TO_CLASSIFY';
+  reason_codes?: string[];
+  longitudinal_state?: 'LONGITUDINAL_SUPPORTED' | 'LIMITED_LONGITUDINAL_HISTORY' | 'LONGITUDINAL_UNAVAILABLE';
+  progression_availability_message?: string;
 }
 
 export interface BatchQueueItem {

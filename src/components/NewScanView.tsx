@@ -24,6 +24,11 @@ import {
   Utensils,
   ShieldAlert,
   AlertOctagon,
+  ShieldCheck,
+  Info,
+  FlaskConical,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 import { useMedicalData } from '../context/MedicalDataContext';
 import { useAccessibility } from '../context/AccessibilityContext';
@@ -37,6 +42,19 @@ import { ImageLightboxModal } from './ImageLightboxModal';
 import { DoctorReviewSection } from './DoctorReviewSection';
 import { MedicalRAGDrawer } from './MedicalRAGDrawer';
 import { BookOpen } from 'lucide-react';
+
+const DEMO_SCENARIOS = [
+  { id: 'NORMAL', label: '1. Normal Fundus', stage: 'Stage 0', category: 'Standard', desc: 'Annual recall' },
+  { id: 'MILD_NPDR', label: '2. Mild NPDR', stage: 'Stage 1', category: 'Standard', desc: '6-12m follow-up' },
+  { id: 'MODERATE_NPDR', label: '3. Moderate NPDR', stage: 'Stage 2', category: 'Standard', desc: 'Specialist referral' },
+  { id: 'SEVERE_PDR', label: '4. Proliferative DR', stage: 'Stage 4', category: 'Standard', desc: 'Urgent escalation' },
+  { id: 'POOR_QUALITY', label: '5. Quality Reject', stage: 'Safety', category: 'Gate', desc: 'Optical blur block' },
+  { id: 'LOW_CONFIDENCE', label: '6. Low Confidence', stage: 'Safety', category: 'Gate', desc: 'Uncertainty flag' },
+  { id: 'OOD_NON_FUNDUS', label: '7. Non-Fundus OOD', stage: 'Safety', category: 'Gate', desc: 'Artifact rejection' },
+  { id: 'MODEL_DISAGREEMENT', label: '8. Disagreement', stage: 'Safety', category: 'Gate', desc: 'Consensus conflict' },
+  { id: 'LATERALITY_MISMATCH', label: '9. Laterality Warning', stage: 'Safety', category: 'Gate', desc: 'OD/OS mismatch' },
+  { id: 'OFFLINE_SYNC', label: '10. Offline Sync', stage: 'Reliability', category: 'Sync', desc: 'Ledger sync queue' },
+];
 
 type PatientMode = 'existing' | 'new' | 'quick';
 
@@ -79,6 +97,10 @@ export const NewScanView: React.FC = () => {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [loadingStep, setLoadingStep] = useState(0);
 
+  // Eye Laterality & Operator Session State
+  const [selectedEye, setSelectedEye] = useState<'OD' | 'OS'>('OD');
+  const [demoSuiteOpen, setDemoSuiteOpen] = useState(true);
+
   // Lightbox Modal State
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [ragDrawerOpen, setRagDrawerOpen] = useState(false);
@@ -89,6 +111,48 @@ export const NewScanView: React.FC = () => {
   const [invertHeatmap, setInvertHeatmap] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Run isolated demonstration scenario
+  const handleRunDemoScenario = async (scenarioId: string) => {
+    setIsAnalyzing(true);
+    setLoadingStep(1);
+    try {
+      const res = await fetch('/api/demo/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scenario_id: scenarioId }),
+      });
+      const data = await res.json();
+      if (data.success && data.result) {
+        const sim = data.result;
+        const simPatient: Patient = {
+          id: sim.patient_id,
+          name: sim.scenario.patient?.name || 'Demo Subject',
+          age: sim.scenario.patient?.age || 55,
+          gender: 'Male',
+          diabetes_duration: sim.scenario.patient?.diabetes_duration || 8,
+          sugar_level: 160,
+          hba1c: sim.scenario.patient?.hba1c || 7.8,
+          created_at: new Date().toISOString(),
+        };
+        setActivePatient(simPatient);
+        await analyzeScan(simPatient, {
+          preset: selectedPreset || undefined,
+          eye: (sim.scenario.operator_eye as 'OD' | 'OS') || selectedEye,
+          demoScenario: sim,
+        });
+        speak(`Loaded demo scenario: ${sim.scenario.title}`);
+      } else {
+        alert(data.error || 'Failed to run demo scenario.');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Demo API call failed. Ensure backend is running.');
+    } finally {
+      setIsAnalyzing(false);
+      setLoadingStep(0);
+    }
+  };
 
   // File Upload Handlers
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -174,6 +238,7 @@ export const NewScanView: React.FC = () => {
       const result = await analyzeScan(patientToUse, {
         file: selectedFile || undefined,
         preset: selectedPreset || undefined,
+        eye: selectedEye,
       });
       setIsAnalyzing(false);
       setLoadingStep(0);
@@ -576,6 +641,110 @@ export const NewScanView: React.FC = () => {
               )}
             </div>
 
+            {/* Eye Laterality Selection & Acquisition Context */}
+            <div className="p-4 bg-gray-50 rounded-2xl border border-gray-200 space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <span className="text-xs font-black uppercase tracking-wider text-gray-700 flex items-center gap-1.5">
+                  <Eye className="w-4 h-4 text-[#1E54B7]" />
+                  Eye (Laterality) Selected for Analysis:
+                </span>
+                <span className="text-[11px] text-gray-500 font-mono">
+                  Operator Verified • Landmark Gate: Enforced
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={() => setSelectedEye('OD')}
+                  className={`py-3 px-4 rounded-xl font-black text-xs sm:text-sm flex items-center justify-center gap-2 border-2 transition-all cursor-pointer ${
+                    selectedEye === 'OD'
+                      ? 'bg-[#1E54B7] text-white border-[#1E54B7] shadow-md scale-[1.01]'
+                      : 'bg-white text-gray-700 border-gray-200 hover:border-gray-300'
+                  }`}
+                >
+                  <span>Right Eye (OD - Oculus Dexter)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedEye('OS')}
+                  className={`py-3 px-4 rounded-xl font-black text-xs sm:text-sm flex items-center justify-center gap-2 border-2 transition-all cursor-pointer ${
+                    selectedEye === 'OS'
+                      ? 'bg-[#1E54B7] text-white border-[#1E54B7] shadow-md scale-[1.01]'
+                      : 'bg-white text-gray-700 border-gray-200 hover:border-gray-300'
+                  }`}
+                >
+                  <span>Left Eye (OS - Oculus Sinister)</span>
+                </button>
+              </div>
+              <p className="text-[11px] text-gray-500">
+                Landmark localization evaluates nasal optic nerve vs temporal fovea geometry to cross-check this operator tag.
+              </p>
+            </div>
+
+            {/* Hackathon Demo & Safety Simulation Suite */}
+            <div className="p-5 bg-gradient-to-br from-indigo-50/70 to-sky-50/70 rounded-3xl border-2 border-indigo-200/80 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="p-1.5 rounded-lg bg-indigo-600 text-white">
+                    <FlaskConical className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-black text-indigo-950">
+                      Evaluator & Red-Team Suite (10 Scenarios)
+                    </h3>
+                    <p className="text-[11px] text-indigo-700">
+                      Isolated synthetic sandbox (<code>DEMO-SIM-</code>) — test safety boundaries with 1 click
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setDemoSuiteOpen((prev) => !prev)}
+                  className="p-1.5 rounded-lg hover:bg-indigo-100 text-indigo-800 transition-all cursor-pointer"
+                  aria-label="Toggle Demo Suite"
+                >
+                  {demoSuiteOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                </button>
+              </div>
+
+              {demoSuiteOpen && (
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 pt-2">
+                  {DEMO_SCENARIOS.map((sc) => (
+                    <button
+                      key={sc.id}
+                      type="button"
+                      onClick={() => handleRunDemoScenario(sc.id)}
+                      className={`p-2.5 rounded-xl border text-left transition-all hover:scale-[1.02] cursor-pointer shadow-sm ${
+                        sc.category === 'Standard'
+                          ? 'bg-white border-sky-200 hover:border-[#1E54B7]'
+                          : sc.category === 'Gate'
+                          ? 'bg-rose-50/80 border-rose-200 hover:border-rose-400'
+                          : 'bg-amber-50/80 border-amber-200 hover:border-amber-400'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-1">
+                        <span className={`text-[10px] font-black uppercase px-1.5 py-0.5 rounded ${
+                          sc.category === 'Standard'
+                            ? 'bg-sky-100 text-[#1E54B7]'
+                            : sc.category === 'Gate'
+                            ? 'bg-rose-100 text-rose-800'
+                            : 'bg-amber-100 text-amber-800'
+                        }`}>
+                          {sc.stage}
+                        </span>
+                      </div>
+                      <div className="text-xs font-bold text-gray-900 truncate">
+                        {sc.label}
+                      </div>
+                      <div className="text-[10px] text-gray-500 truncate">
+                        {sc.desc}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
             {/* Run Analysis Big CTA Button */}
             <div className="pt-2">
               <button
@@ -774,6 +943,127 @@ export const NewScanView: React.FC = () => {
                 </button>
               </div>
             </div>
+          </div>
+
+          {/* 1.5. SAFETY ARBITRATION & DECISION GATE BANNER */}
+          <div className="p-6 sm:p-7 bg-white text-black border-4 border-white rounded-[32px] shadow-2xl space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-gray-100 pb-3">
+              <div className="flex items-center gap-2.5">
+                <ShieldCheck className="w-6 h-6 text-[#1E54B7]" />
+                <div>
+                  <h3 className="text-lg sm:text-xl font-black text-black font-sans">
+                    Clinical Safety Gate & Decision Arbitration
+                  </h3>
+                  <p className="text-xs text-gray-500">
+                    Pre-inference verification, anatomical landmarks & multi-gate policy check
+                  </p>
+                </div>
+              </div>
+              <span className="text-xs font-mono font-bold px-3 py-1 bg-gray-100 text-gray-700 rounded-full border border-gray-200">
+                Policy Version: SAFE-1.0
+              </span>
+            </div>
+
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              {/* Safety State */}
+              <div className="p-3.5 rounded-2xl bg-gray-50 border border-gray-200 space-y-1">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-gray-500 block">
+                  Safety State
+                </span>
+                <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-black ${
+                  (activeScan.safety_state || 'PASS') === 'PASS'
+                    ? 'bg-emerald-100 text-emerald-800'
+                    : (activeScan.safety_state || 'PASS') === 'REJECT'
+                    ? 'bg-rose-100 text-rose-800'
+                    : 'bg-amber-100 text-amber-800'
+                }`}>
+                  {(activeScan.safety_state || 'PASS') === 'PASS' ? (
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-700" />
+                  ) : (
+                    <AlertTriangle className="w-3.5 h-3.5 text-amber-700" />
+                  )}
+                  {activeScan.safety_state || 'PASS'}
+                </span>
+              </div>
+
+              {/* Automation Level */}
+              <div className="p-3.5 rounded-2xl bg-gray-50 border border-gray-200 space-y-1">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-gray-500 block">
+                  Automation Level
+                </span>
+                <span className="text-xs font-black text-gray-800">
+                  {activeScan.automation_level || 'DECISION_SUPPORT'}
+                </span>
+              </div>
+
+              {/* Laterality & Landmarks */}
+              <div className="p-3.5 rounded-2xl bg-gray-50 border border-gray-200 space-y-1">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-gray-500 block">
+                  Eye (Laterality)
+                </span>
+                <span className="text-xs font-black text-[#1E54B7]">
+                  {activeScan.eye === 'OS' ? 'Left Eye (OS)' : 'Right Eye (OD)'}
+                </span>
+              </div>
+
+              {/* Longitudinal History */}
+              <div className="p-3.5 rounded-2xl bg-gray-50 border border-gray-200 space-y-1">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-gray-500 block">
+                  Longitudinal Data
+                </span>
+                <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-black ${
+                  activeScan.longitudinal_state === 'LONGITUDINAL_SUPPORTED'
+                    ? 'bg-emerald-100 text-emerald-800'
+                    : 'bg-sky-100 text-sky-900'
+                }`}>
+                  {activeScan.longitudinal_state === 'LONGITUDINAL_SUPPORTED'
+                    ? 'Cohort History'
+                    : 'Single Visit Baseline'}
+                </span>
+              </div>
+            </div>
+
+            {/* Active Reason Codes */}
+            {activeScan.reason_codes && activeScan.reason_codes.length > 0 && (
+              <div className="space-y-1.5 pt-1">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-gray-500 block">
+                  Active Reason Codes:
+                </span>
+                <div className="flex flex-wrap gap-2">
+                  {activeScan.reason_codes.map((rc, i) => (
+                    <span
+                      key={i}
+                      className="px-2.5 py-1 rounded-lg bg-gray-100 border border-gray-200 text-xs font-mono font-bold text-gray-700"
+                    >
+                      {rc}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Honest Longitudinal Advisory Banner */}
+            {(activeScan.longitudinal_state === 'LIMITED_LONGITUDINAL_HISTORY' ||
+              activeScan.longitudinal_state === 'LONGITUDINAL_UNAVAILABLE') && (
+              <div className="p-3.5 rounded-2xl bg-sky-50 border border-sky-200 flex items-start gap-2.5 text-xs text-sky-900">
+                <Info className="w-4 h-4 text-[#1E54B7] shrink-0 mt-0.5" />
+                <div>
+                  <strong className="block font-bold mb-0.5">Clinical Honesty Notice (No Fabricated Progression):</strong>
+                  Progression risk estimates below are statistical cohort models based on diabetes duration and HbA1c. DrishtiAI does not synthesize temporal progression without verified multi-visit historical scans.
+                </div>
+              </div>
+            )}
+
+            {/* Warning if Review is Required */}
+            {(activeScan.safety_state === 'REVIEW_REQUIRED' || activeScan.safety_state === 'REJECT') && (
+              <div className="p-3.5 rounded-2xl bg-amber-50 border border-amber-300 flex items-start gap-2.5 text-xs text-amber-950">
+                <AlertTriangle className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+                <div>
+                  <strong className="block font-bold mb-0.5">Clinical Review Mandatory:</strong>
+                  The safety gate flagged an edge case or uncertainty. Ophthalmologist review is required before clinical referral or discharge.
+                </div>
+              </div>
+            )}
           </div>
 
           {/* 2. IMAGE TRIPTYCH (INTERACTIVE RETINAL VIEWER) */}

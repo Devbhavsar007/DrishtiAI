@@ -193,6 +193,79 @@ def init_db():
                 conn.execute(f"ALTER TABLE audit_log ADD COLUMN {col_def}")
             except sqlite3.OperationalError:
                 pass  # Column already exists
+
+        # Schema migrations tracking table
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS schema_migrations (
+                version INTEGER PRIMARY KEY,
+                applied_at TEXT DEFAULT (datetime('now')),
+                description TEXT
+            );
+        """)
+
+        # Migration v1: Baseline tables
+        conn.execute("""
+            INSERT OR IGNORE INTO schema_migrations (version, description)
+            VALUES (1, 'Baseline clinical tables, audit log, and sync events');
+        """)
+
+        # Migration v2: Screening sessions, safety attributes, and sync ledger extensions
+        # 1. Add screening_sessions table
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS screening_sessions (
+                session_id TEXT PRIMARY KEY,
+                patient_id TEXT NOT NULL,
+                operator_id TEXT NOT NULL,
+                eye TEXT NOT NULL,
+                current_state TEXT NOT NULL,
+                image_hash TEXT DEFAULT '',
+                safety_state TEXT DEFAULT 'VERIFIED',
+                automation_level TEXT DEFAULT 'AUTOMATED_ASSISTANCE',
+                reason_codes_json TEXT DEFAULT '[]',
+                created_at TEXT DEFAULT (datetime('now')),
+                updated_at TEXT DEFAULT (datetime('now')),
+                FOREIGN KEY (patient_id) REFERENCES patients(id)
+            );
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_patient ON screening_sessions(patient_id);")
+
+        # 2. Add columns to scans table if missing
+        scan_cols = [
+            "laterality TEXT DEFAULT 'OD'",
+            "operator_id TEXT DEFAULT 'operator-1'",
+            "safety_state TEXT DEFAULT 'VERIFIED'",
+            "automation_level TEXT DEFAULT 'AUTOMATED_ASSISTANCE'",
+            "reason_codes_json TEXT DEFAULT '[]'",
+            "image_hash TEXT DEFAULT ''",
+            "device_id TEXT DEFAULT 'LOCAL-EDGE-01'",
+            "screening_state TEXT DEFAULT 'FINALIZED'",
+        ]
+        for c in scan_cols:
+            try:
+                conn.execute(f"ALTER TABLE scans ADD COLUMN {c}")
+            except sqlite3.OperationalError:
+                pass
+
+        # 3. Add columns to sync_events table if missing
+        sync_cols = [
+            "sync_attempt INTEGER DEFAULT 0",
+            "retry_count INTEGER DEFAULT 0",
+            "last_sync_at TEXT",
+            "server_version INTEGER DEFAULT 1",
+            "conflict_type TEXT DEFAULT ''",
+            "sync_error TEXT DEFAULT ''",
+        ]
+        for c in sync_cols:
+            try:
+                conn.execute(f"ALTER TABLE sync_events ADD COLUMN {c}")
+            except sqlite3.OperationalError:
+                pass
+
+        conn.execute("""
+            INSERT OR IGNORE INTO schema_migrations (version, description)
+            VALUES (2, 'Screening sessions, safety metadata, and sync ledger columns');
+        """)
+
         conn.commit()
     log.info("Database initialized at %s", DB_PATH)
 
@@ -203,6 +276,75 @@ def _audit(conn, action: str, entity_type: str, entity_id: str, details: str = "
         "INSERT INTO audit_log (action, entity_type, entity_id, actor_id, actor_role, details) VALUES (?, ?, ?, ?, ?, ?)",
         (action, entity_type, entity_id, _sanitize_string(actor_id, 100), _sanitize_string(actor_role, 50), _sanitize_string(details, 2000))
     )
+
+
+def log_audit_event(action: str, entity_type: str, entity_id: str, details: str = "", actor_id: str = "system", actor_role: str = "SYSTEM"):
+    """Public wrapper to record audit log events."""
+    with get_db() as conn:
+        _audit(conn, action, entity_type, entity_id, details, actor_id, actor_role)
+        conn.commit()
+
+
+# === Screening Sessions CRUD ===
+
+def create_or_update_screening_session(
+    session_id: str,
+    patient_id: str,
+    operator_id: str,
+    eye: str,
+    current_state: str,
+    image_hash: str = "",
+    safety_state: str = "VERIFIED",
+    automation_level: str = "AUTOMATED_ASSISTANCE",
+    reason_codes: list = None,
+):
+    """Create or update a screening session record."""
+    rc_json = json.dumps(reason_codes or [])
+    with get_db() as conn:
+        conn.execute(
+            """
+            INSERT INTO screening_sessions (
+                session_id, patient_id, operator_id, eye, current_state,
+                image_hash, safety_state, automation_level, reason_codes_json, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+            ON CONFLICT(session_id) DO UPDATE SET
+                current_state = excluded.current_state,
+                image_hash = excluded.image_hash,
+                safety_state = excluded.safety_state,
+                automation_level = excluded.automation_level,
+                reason_codes_json = excluded.reason_codes_json,
+                updated_at = datetime('now')
+            """,
+            (session_id, patient_id, operator_id, eye, current_state, image_hash, safety_state, automation_level, rc_json)
+        )
+        _audit(conn, "SESSION_UPDATE", "screening_session", session_id, f"state={current_state}", operator_id, "OPERATOR")
+        conn.commit()
+
+
+def get_screening_session(session_id: str):
+    """Retrieve a screening session by session_id."""
+    with get_db() as conn:
+        row = conn.execute("SELECT * FROM screening_sessions WHERE session_id = ?", (session_id,)).fetchone()
+        if not row:
+            return None
+        d = dict(row)
+        if d.get("reason_codes_json"):
+            try:
+                d["reason_codes"] = json.loads(d["reason_codes_json"])
+            except Exception:
+                d["reason_codes"] = []
+        return d
+
+
+def update_screening_session_state(session_id: str, new_state: str, actor_id: str = "operator-1", reason: str = ""):
+    """Update state of an existing screening session."""
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE screening_sessions SET current_state = ?, updated_at = datetime('now') WHERE session_id = ?",
+            (new_state, session_id)
+        )
+        _audit(conn, "SESSION_STATE_TRANSITION", "screening_session", session_id, f"to_state={new_state} reason={reason}", actor_id, "OPERATOR")
+        conn.commit()
 
 
 def generate_patient_id():
@@ -335,6 +477,7 @@ def delete_patient(patient_id):
         conn.execute("DELETE FROM progression_assessments WHERE patient_id = ?", (patient_id,))
         conn.execute("DELETE FROM referrals WHERE patient_id = ?", (patient_id,))
         conn.execute("DELETE FROM scans WHERE patient_id = ?", (patient_id,))
+        conn.execute("DELETE FROM screening_sessions WHERE patient_id = ?", (patient_id,))
         conn.execute("DELETE FROM patients WHERE id = ?", (patient_id,))
         _audit(conn, "DELETE", "patient", patient_id)
         conn.commit()
@@ -343,15 +486,21 @@ def delete_patient(patient_id):
 # === Scan CRUD ===
 
 def save_scan(scan_id, patient_id, detection_result, heatmap_analysis,
-              vessel_stats, report, image_paths, processing_time):
+              vessel_stats, report, image_paths, processing_time,
+              laterality='OD', operator_id='operator-1', safety_state='VERIFIED',
+              automation_level='AUTOMATED_ASSISTANCE', reason_codes=None,
+              image_hash='', device_id='LOCAL-EDGE-01', screening_state='FINALIZED'):
     """Save a completed scan to the database."""
+    reason_codes_str = json.dumps(reason_codes or [])
     with get_db() as conn:
         try:
             conn.execute(
                 """INSERT INTO scans (id, patient_id, stage, stage_name, confidence,
                    severity, color, all_probabilities, model_used, heatmap_analysis,
                    vessel_stats, report, image_original, image_heatmap, image_vessels,
-                   processing_time) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   processing_time, laterality, operator_id, safety_state,
+                   automation_level, reason_codes_json, image_hash, device_id, screening_state)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     scan_id, patient_id,
                     detection_result.get('stage', 0),
@@ -367,7 +516,15 @@ def save_scan(scan_id, patient_id, detection_result, heatmap_analysis,
                     image_paths.get('original', ''),
                     image_paths.get('heatmap', ''),
                     image_paths.get('vessels', ''),
-                    processing_time
+                    processing_time,
+                    laterality,
+                    operator_id,
+                    safety_state,
+                    automation_level,
+                    reason_codes_str,
+                    image_hash,
+                    device_id,
+                    screening_state,
                 )
             )
             _audit(conn, "CREATE", "scan", scan_id,

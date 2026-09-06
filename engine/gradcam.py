@@ -23,6 +23,11 @@ def generate_gradcam(preprocessed_image, original_image, save_path=None):
         heatmap_raw: float array of activation intensity (for analysis)
     """
     try:
+        from config import DR_MODEL_PATH
+        import os
+        if not os.path.exists(DR_MODEL_PATH):
+            return _generate_simulated_heatmap(original_image, save_path)
+
         import tensorflow as tf
         from engine.detector import get_model_for_gradcam
 

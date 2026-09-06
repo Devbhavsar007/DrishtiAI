@@ -1,0 +1,153 @@
+"""
+Failure Injection and Red-Teaming Test Suite for DrishtiAI.
+
+Tests defensive boundaries against:
+1. Decompression bomb payloads (>25 MP limit)
+2. Corrupt byte streams and truncated headers
+3. Zero-variance blank/black frames
+4. Duplicate image SHA-256 fingerprinting
+5. Non-fundus artifact injection (OOD)
+6. Malformed JSON and payload boundaries
+"""
+
+import io
+import os
+import pytest
+from PIL import Image
+import numpy as np
+
+from engine.safety.image_validator import ImageValidator, ImageValidationResult
+from engine.safety.ood import evaluate_ood_signal, OODResult
+from engine.safety.anatomy import assess_anatomy_and_laterality, AnatomyResult
+from app import app
+import database
+
+
+@pytest.fixture
+def client():
+    app.config["TESTING"] = True
+    with app.test_client() as c:
+        yield c
+
+
+def _create_test_image(width=512, height=512, color=(180, 50, 20), format="JPEG"):
+    """Helper to generate a valid in-memory image."""
+    img = Image.new("RGB", (width, height), color=color)
+    # Add some high variance texture
+    arr = np.array(img)
+    arr[100:200, 100:200] = [240, 220, 150]
+    arr[250:350, 250:350] = [30, 20, 10]
+    img = Image.fromarray(arr)
+    buf = io.BytesIO()
+    img.save(buf, format=format)
+    return buf.getvalue()
+
+
+class TestImageValidatorRedTeam:
+    """Adversarial image payload injection tests."""
+
+    def test_corrupted_bytes_injection(self):
+        """Random junk bytes must be rejected safely without crashing."""
+        validator = ImageValidator()
+        junk_bytes = b"NOT_AN_IMAGE_HEADER" + os.urandom(2048)
+        result = validator.validate_bytes(junk_bytes)
+        assert not result.is_valid
+        assert result.rejection_reason in ("UNSUPPORTED_FORMAT", "CORRUPTED_IMAGE")
+        assert len(result.errors) > 0
+
+    def test_truncated_header_injection(self):
+        """Image with truncated header (partial JPEG) must fail gracefully."""
+        validator = ImageValidator()
+        partial_jpeg = b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00"
+        result = validator.validate_bytes(partial_jpeg)
+        assert not result.is_valid
+        assert result.rejection_reason in ("CORRUPTED_IMAGE", "UNSUPPORTED_FORMAT")
+
+    def test_decompression_bomb_dimension_limit(self):
+        """Images exceeding 25 megapixels (e.g. 6000x5000 = 30MP) must be rejected."""
+        validator = ImageValidator(max_megapixels=25.0)
+        # Create an image header with massive dimensions
+        # Pillow allows creating image in memory
+        large_img = Image.new("RGB", (6000, 5000), color=(100, 100, 100))
+        buf = io.BytesIO()
+        large_img.save(buf, format="JPEG", quality=20)
+        large_bytes = buf.getvalue()
+
+        result = validator.validate_bytes(large_bytes)
+        assert not result.is_valid
+        assert result.rejection_reason in ("DIMENSIONS_EXCEED_LIMIT", "DECOMPRESSION_BOMB_RISK")
+
+    def test_blank_black_image_injection(self):
+        """Completely black or flat uniform images must be rejected as uninformative."""
+        validator = ImageValidator()
+        flat_img = Image.new("RGB", (400, 400), color=(0, 0, 0))
+        buf = io.BytesIO()
+        flat_img.save(buf, format="PNG")
+        flat_bytes = buf.getvalue()
+
+        result = validator.validate_bytes(flat_bytes)
+        assert not result.is_valid
+        assert result.rejection_reason == "BLANK_OR_UNINFORMATIVE"
+
+    def test_duplicate_sha256_detection(self):
+        """Presenting identical image bytes twice must detect duplicate hash."""
+        validator = ImageValidator()
+        valid_bytes = _create_test_image(format="JPEG")
+        
+        # First submission
+        res1 = validator.validate_bytes(valid_bytes)
+        assert res1.is_valid
+        assert not res1.duplicate_detected
+        assert res1.sha256_hash != ""
+
+        # Second submission of identical bytes
+        res2 = validator.validate_bytes(valid_bytes)
+        assert res2.is_valid
+        assert res2.duplicate_detected
+        assert res2.sha256_hash == res1.sha256_hash
+
+
+class TestOutOfDistributionRedTeam:
+    """Out-of-distribution artifact handling tests."""
+
+    def test_non_fundus_domain_invalid(self):
+        """Evaluating a non-fundus picture (e.g. skin rash or doc) flags domain shift."""
+        # Create a non-fundus image (e.g. blue/white document-like image)
+        img = Image.new("RGB", (300, 300), color=(240, 240, 255))
+        arr = np.array(img)
+        # In fundus, red channel dominates strongly; here blue dominates
+        ood_res = evaluate_ood_signal(arr)
+        # Should flag OOD heuristic shift or domain invalid
+        assert not ood_res.domain_valid or ood_res.is_ood_suspected or ood_res.level_triggered > 0
+
+
+class TestEndpointFailureBoundaries:
+    """HTTP API error handling on malformed or malicious requests."""
+
+    def test_ingest_validate_with_corrupt_payload(self, client):
+        """POST /api/ingest/validate with corrupted file returns 400."""
+        data = {
+            "image": (io.BytesIO(b"MALICIOUS_GARBAGE_BYTES_12345"), "attack.jpg")
+        }
+        res = client.post("/api/ingest/validate", data=data, content_type="multipart/form-data")
+        assert res.status_code == 400
+        json_data = res.get_json()
+        assert not json_data["is_valid"]
+        assert "errors" in json_data
+
+    def test_session_confirm_nonexistent(self, client):
+        """POST /api/sessions/<invalid_id>/confirm returns 404."""
+        res = client.post(
+            "/api/sessions/SES-DOES-NOT-EXIST/confirm",
+            json={"operator_id": "OP-99", "confirmed_eye": "OD"},
+        )
+        assert res.status_code == 404
+        data = res.get_json()
+        assert "error" in data
+
+    def test_demo_run_invalid_scenario(self, client):
+        """POST /api/demo/run with nonexistent scenario returns 400."""
+        res = client.post("/api/demo/run", json={"scenario_id": "NON_EXISTENT_SCENARIO_XYZ"})
+        assert res.status_code == 400
+        data = res.get_json()
+        assert "error" in data

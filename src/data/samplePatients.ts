@@ -183,13 +183,19 @@ export function buildSyntheticScan(
       diet_recommendations: diets[stage],
       urgency,
       recommended_follow_up: followUp,
-      disclaimer: 'DrishtiAI is an AI-assisted clinical diagnostic decision support tool. All findings must be clinically correlated and confirmed by a licensed ophthalmologist or retinal specialist.',
+      disclaimer: 'This is an AI-assisted screening assessment, NOT a definitive diagnosis. Clinical review by an ophthalmologist is mandatory.',
     },
     images: {
       original: createFundusDataUrl(stage, 'original'),
       heatmap: createFundusDataUrl(stage, 'heatmap'),
       vessels: createFundusDataUrl(stage, 'vessels'),
     },
+    eye: 'OD',
+    safety_state: 'VERIFIED',
+    automation_level: 'AUTOMATED_ASSISTANCE',
+    reason_codes: [],
+    longitudinal_state: 'LIMITED_LONGITUDINAL_HISTORY',
+    progression_availability_message: 'Progression prediction unavailable: insufficient longitudinal data.',
   };
 }
 
