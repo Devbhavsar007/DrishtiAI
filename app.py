@@ -416,21 +416,30 @@ def index():
 @app.route("/results/<path:filename>")
 @require_role(Role.HEALTH_WORKER, Role.DOCTOR, Role.ADMIN, Role.PATIENT)
 def serve_result(filename):
-    """Serve generated result images securely with path traversal protection and RBAC."""
+    """Serve generated result images securely with path traversal protection, extension validation, and strict IDOR prevention."""
+    # Reject directory traversal sequences immediately
+    if ".." in filename or "%2f" in filename.lower() or "%5c" in filename.lower() or "\\" in filename:
+        return jsonify({"success": False, "error": "Access denied: directory traversal is prohibited."}), 403
+
     safe_filename = os.path.basename(filename)
+    # Validate allowed image extensions
+    ext = safe_filename.rsplit(".", 1)[-1].lower() if "." in safe_filename else ""
+    if ext not in ALLOWED_EXTENSIONS:
+        return jsonify({"success": False, "error": f"Invalid artifact format '{ext}'."}), 403
+
+    # IDOR protection: patient can only view their own scan artifacts (Fail closed)
+    if hasattr(g, "current_user") and g.current_user and g.current_user.get("actor_role") == Role.PATIENT.value:
+        caller_id = g.current_user.get("actor_id")
+        scan_id = safe_filename.split("_")[0]
+        scan = get_scan(scan_id)
+        if not scan or scan.get("patient_id") != caller_id:
+            return jsonify({"success": False, "error": "Access denied: patient cannot access other patient records."}), 403
+
     safe_path = os.path.abspath(os.path.join(RESULTS_DIR, safe_filename))
     if not safe_path.startswith(os.path.abspath(RESULTS_DIR)):
         return jsonify({"success": False, "error": "Access denied: invalid file path."}), 403
     if not os.path.isfile(safe_path):
         return jsonify({"success": False, "error": "File not found."}), 404
-
-    # IDOR protection: patient can only view their own scan artifacts
-    if hasattr(g, "current_user") and g.current_user and g.current_user.get("actor_role") == Role.PATIENT.value:
-        caller_id = g.current_user.get("actor_id")
-        scan_id = safe_filename.split("_")[0]
-        scan = get_scan(scan_id)
-        if scan and scan.get("patient_id") != caller_id:
-            return jsonify({"success": False, "error": "Access denied: patient cannot access other patient records."}), 403
 
     return send_from_directory(RESULTS_DIR, safe_filename)
 
@@ -881,12 +890,15 @@ def api_auth_login():
         }), 400
 
     secret = data.get("secret") or data.get("password") or request.headers.get("X-Drishti-Secret")
-    if requested_role in (Role.ADMIN.value, Role.DOCTOR.value):
-        if not verify_role_credentials(requested_role, secret):
-            return jsonify({
-                "success": False,
-                "error": f"Privileged role '{requested_role}' requires valid secret credentials. Direct self-elevation is prohibited."
-            }), 401
+    if not verify_role_credentials(requested_role, secret, user_id=user_id):
+        if requested_role in (Role.ADMIN.value, Role.DOCTOR.value):
+            err_msg = f"Privileged role '{requested_role}' requires valid secret credentials. Direct self-elevation is prohibited."
+        else:
+            err_msg = f"Authentication failed for role '{requested_role}'. Missing, invalid credentials, or unverified identity."
+        return jsonify({
+            "success": False,
+            "error": err_msg
+        }), 401
 
     token = create_access_token(user_id=user_id, role=requested_role)
     return jsonify({
@@ -1098,14 +1110,14 @@ def analyze():
         log.info("Analysis %s completed in %.2fs — stage %s (Safety: %s)",
                  analysis_id, elapsed, detection_result.get('stage', '?'), safety_eval.safety_state)
 
-        # --- 8. Save to Database ---
+        # --- 8. Save to Database (Safety before commit) ---
         image_paths = {
             "original": f"/results/{analysis_id}_scan.png",
             "heatmap": f"/results/{analysis_id}_heatmap.png",
             "vessels": f"/results/{analysis_id}_vessels.png",
         }
 
-        if patient_id:
+        if patient_id and safety_eval.safety_state != "REJECTED":
             try:
                 save_scan(
                     scan_id=analysis_id,
@@ -1115,9 +1127,15 @@ def analyze():
                     vessel_stats=vessel_stats,
                     report=report,
                     image_paths=image_paths,
-                    processing_time=elapsed
+                    processing_time=elapsed,
+                    laterality=getattr(anatomy_res, "detected_laterality", "OD"),
+                    operator_id=verified_operator,
+                    safety_state=safety_eval.safety_state,
+                    automation_level=safety_eval.automation_level,
+                    reason_codes=safety_eval.reason_codes,
+                    image_hash=getattr(val_result, "sha256", ""),
                 )
-                log.info("Scan %s saved for patient %s", analysis_id, patient_id)
+                log.info("Scan %s saved for patient %s (Safety: %s)", analysis_id, patient_id, safety_eval.safety_state)
             except Exception as db_err:
                 log.warning("Failed to save scan to DB: %s", db_err)
 
@@ -1399,23 +1417,7 @@ def analyze_v2():
             "vessels": f"/results/{analysis_id}_vessels.png",
         }
 
-        # Save to database if patient_id provided
-        if patient_id:
-            try:
-                save_scan(
-                    scan_id=analysis_id,
-                    patient_id=patient_id,
-                    detection_result=detection_result,
-                    heatmap_analysis=heatmap_analysis,
-                    vessel_stats=structures_dict,
-                    report=report,
-                    image_paths=image_paths,
-                    processing_time=elapsed
-                )
-            except Exception as db_err:
-                log.warning("Failed to save scan to DB: %s", db_err)
-
-        # ── Centralized Safety Arbitration ──
+        # ── Centralized Safety Arbitration (Safety Before Commit) ──
         verified_operator = (g.current_user.get("actor_id") if hasattr(g, "current_user") and g.current_user else request.form.get("operator_id") or "operator-1")
         safety_eval = safety_engine.evaluate(
             image_val=val_result,
@@ -1425,6 +1427,29 @@ def analyze_v2():
             patient_id=patient_id,
             operator_id=verified_operator,
         )
+
+        # Save to database if patient_id provided and screening is not rejected
+        if patient_id and safety_eval.safety_state != "REJECTED":
+            try:
+                save_scan(
+                    scan_id=analysis_id,
+                    patient_id=patient_id,
+                    detection_result=detection_result,
+                    heatmap_analysis=heatmap_analysis,
+                    vessel_stats=structures_dict,
+                    report=report,
+                    image_paths=image_paths,
+                    processing_time=elapsed,
+                    laterality=getattr(anatomy_res, "detected_laterality", "OD"),
+                    operator_id=verified_operator,
+                    safety_state=safety_eval.safety_state,
+                    automation_level=safety_eval.automation_level,
+                    reason_codes=safety_eval.reason_codes,
+                    image_hash=getattr(val_result, "sha256", ""),
+                )
+                log.info("Scan %s saved for patient %s (v2, Safety: %s)", analysis_id, patient_id, safety_eval.safety_state)
+            except Exception as db_err:
+                log.warning("Failed to save scan to DB: %s", db_err)
 
         # ── Compile v2 response ──
         result = {
@@ -1590,8 +1615,8 @@ def analyze_v3():
         result["clinical_action_allowed"] = safety_eval.clinical_action_allowed
         result["screening_eligibility"] = safety_eval.screening_eligibility
 
-        # Save to DB if patient_id provided
-        if patient_id and result.get("status") != "REJECTED":
+        # Save to DB if patient_id provided and safety is not rejected
+        if patient_id and result.get("status") != "REJECTED" and safety_eval.safety_state != "REJECTED":
             try:
                 save_scan(
                     scan_id=analysis_id,
@@ -1602,8 +1627,14 @@ def analyze_v3():
                     report=result.get("report") or {},
                     image_paths=result.get("images") or {},
                     processing_time=round(result.get("total_latency_ms", 0) / 1000.0, 2),
+                    laterality=getattr(anatomy_res, "detected_laterality", "OD"),
+                    operator_id=verified_operator,
+                    safety_state=safety_eval.safety_state,
+                    automation_level=safety_eval.automation_level,
+                    reason_codes=safety_eval.reason_codes,
+                    image_hash=getattr(val_result, "sha256", ""),
                 )
-                log.info("Scan %s saved for patient %s (v3 two-tiered)", analysis_id, patient_id)
+                log.info("Scan %s saved for patient %s (v3, Safety: %s)", analysis_id, patient_id, safety_eval.safety_state)
             except Exception as db_err:
                 log.warning("Failed to save v3 scan to DB: %s", db_err)
 

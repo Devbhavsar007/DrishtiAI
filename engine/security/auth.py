@@ -111,23 +111,54 @@ def verify_edge_signature(
         return False
 
 
-def get_current_actor() -> dict[str, str] | None:
+def get_current_actor() -> dict[str, Any] | None:
     """
-    Extract actor information from request headers.
+    Extract authoritative actor information from request headers and session.
     Enforces ZERO-TRUST authentication:
     1. Valid signed Bearer token (dr1.<payload>.<sig>)
     2. Cryptographically signed edge device credentials (HMAC-SHA256 with timestamp)
+    
+    Returns authoritative request context:
+      - authenticated_actor: bool
+      - actor_id: str
+      - actor_role: str
+      - actor_scope: str ('patient:<id>' for PATIENT, 'clinic:all' for clinicians)
+      - device_id: str
+      - session_id: str
+      - request_id: str
     Returns None if unauthenticated. Never defaults to HEALTH_WORKER or DOCTOR.
     """
+    req_id = ""
+    try:
+        from flask import has_request_context
+        if has_request_context():
+            if hasattr(g, "request_id"):
+                req_id = str(g.request_id)
+            elif "X-Request-ID" in request.headers:
+                req_id = request.headers.get("X-Request-ID", "")
+    except Exception:
+        pass
+
+    session_id = request.headers.get("X-Drishti-Session-Id", "") if request else ""
+
     # 1. Bearer Token Authentication
     auth_header = request.headers.get("Authorization", "")
     if auth_header.startswith("Bearer "):
         token = auth_header[7:].strip()
         payload = verify_token(token)
         if payload:
+            actor_id = payload.get("sub", "anonymous")
+            actor_role = payload.get("role", Role.HEALTH_WORKER.value)
+            actor_scope = f"patient:{actor_id}" if actor_role == Role.PATIENT.value else "clinic:all"
+            device_id = payload.get("device_id") or request.headers.get("X-Drishti-Device-Id", "LOCAL-WEB-CLIENT")
             return {
-                "actor_id": payload.get("sub", "anonymous"),
-                "actor_role": payload.get("role", Role.HEALTH_WORKER.value),
+                "authenticated_actor": True,
+                "actor_id": actor_id,
+                "actor_role": actor_role,
+                "actor_scope": actor_scope,
+                "device_id": device_id,
+                "session_id": session_id,
+                "request_id": req_id,
             }
 
     # 2. Cryptographically Signed Edge Device Credentials
@@ -141,9 +172,15 @@ def get_current_actor() -> dict[str, str] | None:
             try:
                 edge_timestamp = int(edge_timestamp_raw)
                 if verify_edge_signature(edge_device, edge_role, edge_timestamp, edge_signature):
+                    actor_scope = f"patient:{edge_device}" if edge_role == Role.PATIENT.value else "clinic:all"
                     return {
+                        "authenticated_actor": True,
                         "actor_id": edge_device,
                         "actor_role": edge_role,
+                        "actor_scope": actor_scope,
+                        "device_id": edge_device,
+                        "session_id": session_id,
+                        "request_id": req_id,
                     }
             except (ValueError, TypeError):
                 pass
@@ -188,15 +225,46 @@ def require_role(*allowed_roles: str | Role) -> Callable:
     return decorator
 
 
-def verify_role_credentials(role: str, secret: str | None) -> bool:
+def verify_role_credentials(role: str, secret: str | None, user_id: str | None = None, env: str | None = None, demo_mode: bool | None = None) -> bool:
     """
-    Verify credentials for privileged roles (ADMIN, DOCTOR) to prevent self-elevation.
-    HEALTH_WORKER and PATIENT do not require master secrets to request tokens.
+    Verify credentials for requested role across deployment environments.
+    - ADMIN: requires ADMIN_SECRET
+    - DOCTOR: requires DOCTOR_SECRET
+    - HEALTH_WORKER: in production (non-demo), requires WORKER_SECRET; in demo/dev/test, permits synthetic accounts
+    - PATIENT: verifies patient exists in database (or synthetic demo namespace)
     """
-    from config import ADMIN_SECRET, DOCTOR_SECRET
+    from config import ADMIN_SECRET, DOCTOR_SECRET, WORKER_SECRET, ENVIRONMENT, DEMO_MODE as CONFIG_DEMO_MODE
+    current_env = (env or ENVIRONMENT).lower()
+    is_demo = demo_mode if demo_mode is not None else CONFIG_DEMO_MODE
     role_clean = role.upper()
+
     if role_clean == Role.ADMIN.value:
         return bool(secret and hmac.compare_digest(str(secret), ADMIN_SECRET))
+
     if role_clean == Role.DOCTOR.value:
         return bool(secret and hmac.compare_digest(str(secret), DOCTOR_SECRET))
-    return True
+
+    if role_clean == Role.HEALTH_WORKER.value:
+        # In production mode without demo flag, require valid worker secret or admin secret
+        if current_env == "production" and not is_demo:
+            if secret and (hmac.compare_digest(str(secret), WORKER_SECRET) or hmac.compare_digest(str(secret), ADMIN_SECRET)):
+                return True
+            return False
+        # In demo, dev, or test mode, permit health worker logins
+        return True
+
+    if role_clean == Role.PATIENT.value:
+        # Patient user_id must exist in database, or match a synthetic demo ID in demo mode
+        if not user_id:
+            return False
+        if is_demo and (user_id.startswith("DEMO-") or user_id.startswith("pat-demo")):
+            return True
+        try:
+            from database import get_patient
+            pat = get_patient(user_id)
+            return pat is not None
+        except Exception:
+            return False
+
+    return False
+

@@ -55,6 +55,8 @@ else:
 EDGE_DEVICE_SECRET = os.getenv("EDGE_DEVICE_SECRET", FLASK_SECRET)
 ADMIN_SECRET = os.getenv("ADMIN_SECRET", "drishti-admin-secret-2026")
 DOCTOR_SECRET = os.getenv("DOCTOR_SECRET", "drishti-doctor-secret-2026")
+WORKER_SECRET = os.getenv("WORKER_SECRET", "drishti-worker-secret-2026")
+ENVIRONMENT = os.getenv("ENVIRONMENT", os.getenv("APP_ENV", "production")).lower()
 
 # ---------------------------------------------------------------------------
 # Model Paths
@@ -76,7 +78,8 @@ PIPELINE_CALIBRATION = os.path.join(MODELS_DIR, "dr_pipeline", "calibration.json
 # ---------------------------------------------------------------------------
 # App Settings
 # ---------------------------------------------------------------------------
-DEBUG = os.getenv("FLASK_DEBUG", "true").lower() == "true"
+# Production default fails closed: DEBUG is false unless explicitly enabled
+DEBUG = os.getenv("FLASK_DEBUG", "false").lower() == "true"
 
 # Rate Limiting & Distributed Worker Storage
 RATELIMIT_STORAGE_URI = os.getenv("RATELIMIT_STORAGE_URI") or os.getenv("REDIS_URL", "memory://")

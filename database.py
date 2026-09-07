@@ -94,6 +94,14 @@ def init_db():
                 image_heatmap TEXT DEFAULT '',
                 image_vessels TEXT DEFAULT '',
                 processing_time REAL DEFAULT 0,
+                laterality TEXT DEFAULT 'OD',
+                operator_id TEXT DEFAULT 'operator-1',
+                safety_state TEXT DEFAULT 'VERIFIED',
+                automation_level TEXT DEFAULT 'AUTOMATED_ASSISTANCE',
+                reason_codes_json TEXT DEFAULT '[]',
+                image_hash TEXT DEFAULT '',
+                device_id TEXT DEFAULT 'LOCAL-EDGE-01',
+                screening_state TEXT DEFAULT 'FINALIZED',
                 created_at TEXT DEFAULT (datetime('now')),
                 FOREIGN KEY (patient_id) REFERENCES patients(id)
             );
@@ -265,6 +273,14 @@ def init_db():
         conn.execute("""
             INSERT OR IGNORE INTO schema_migrations (version, description)
             VALUES (3, 'Audit log request_id correlation and unified schema');
+        """)
+
+        # Migration v4: Canonical schema indices & composite query optimization
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_scans_patient_created ON scans(patient_id, created_at DESC);")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_scans_safety ON scans(safety_state);")
+        conn.execute("""
+            INSERT OR IGNORE INTO schema_migrations (version, description)
+            VALUES (4, 'Canonical schema indices and safety state optimization');
         """)
 
         conn.commit()
@@ -649,7 +665,7 @@ def get_patient_scans(patient_id):
     _validate_patient_id(patient_id)
     with get_db() as conn:
         rows = conn.execute(
-            "SELECT * FROM scans WHERE patient_id = ? ORDER BY created_at DESC",
+            "SELECT * FROM scans WHERE patient_id = ? ORDER BY created_at DESC, rowid DESC",
             (patient_id,)
         ).fetchall()
 
@@ -904,9 +920,9 @@ def get_patient_timeline(patient_id: str) -> dict:
         if not p_row:
             raise ValueError(f"Patient {patient_id} not found.")
 
-        # Get scans in chronological order (oldest to newest)
+        # Get scans in chronological order (oldest to newest, with rowid tie-breaker)
         scan_rows = conn.execute(
-            "SELECT * FROM scans WHERE patient_id = ? ORDER BY created_at ASC",
+            "SELECT * FROM scans WHERE patient_id = ? ORDER BY created_at ASC, rowid ASC",
             (patient_id,)
         ).fetchall()
 
