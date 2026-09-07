@@ -1,6 +1,7 @@
 import unittest
 import uuid
 from app import app
+from engine.security.auth import create_access_token, Role
 from database import (
     create_patient,
     delete_patient,
@@ -80,6 +81,8 @@ class TestDoctorReviewWorkflow(unittest.TestCase):
 
     def test_doctor_review_api_endpoints(self):
         client = app.test_client()
+        doc_token = create_access_token(user_id="DR-OPHTH-01", role=Role.DOCTOR.value)
+        headers = {"Authorization": f"Bearer {doc_token}"}
 
         # 1. Post review
         post_res = client.post(
@@ -93,6 +96,7 @@ class TestDoctorReviewWorkflow(unittest.TestCase):
                 "clinical_notes": "AI detection confirmed. Moderate NPDR with focal microaneurysms.",
                 "recommended_intervention": "Repeat dilated exam in 3 months",
             },
+            headers=headers,
         )
         self.assertEqual(post_res.status_code, 200)
         post_data = post_res.get_json()
@@ -100,7 +104,10 @@ class TestDoctorReviewWorkflow(unittest.TestCase):
         self.assertEqual(post_data["review"]["decision"], "APPROVED")
 
         # 2. Get review
-        get_res = client.get(f"/api/scans/{self.scan_id}/doctor-review")
+        get_res = client.get(
+            f"/api/scans/{self.scan_id}/doctor-review",
+            headers=headers,
+        )
         self.assertEqual(get_res.status_code, 200)
         get_data = get_res.get_json()
         self.assertTrue(get_data["success"])

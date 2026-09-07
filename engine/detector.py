@@ -280,26 +280,46 @@ def _predict_tensorflow(image, model):
     }
 
 
+def validate_model_output(prediction: dict | None) -> bool:
+    """Validate that model output dictionary adheres to safety and structural contracts."""
+    if not isinstance(prediction, dict):
+        return False
+    if "stage" not in prediction or "confidence" not in prediction:
+        return False
+    try:
+        stage = int(prediction["stage"])
+        conf = float(prediction["confidence"])
+        if stage < 0 or stage > 4:
+            return False
+        if conf < 0.0 or conf > 100.0:
+            return False
+        return True
+    except (TypeError, ValueError):
+        return False
+
+
 def _mock_prediction():
-    """Return a deterministic calibrated baseline for development/testing when no model weights exist."""
+    """Return a deterministic conservative baseline when neural model weights are absent."""
     stage = 0
-    confidence = 88.0
+    confidence = 50.0  # Conservative uncertainty score
     stage_info = DR_STAGES[stage]
     return {
         "stage": stage,
         "stage_name": stage_info["name"],
         "confidence": confidence,
         "all_probabilities": {
-            0: 88.0,
-            1: 6.0,
-            2: 3.5,
-            3: 1.5,
-            4: 1.0,
+            0: 50.0,
+            1: 20.0,
+            2: 15.0,
+            3: 10.0,
+            4: 5.0,
         },
         "severity": stage_info["severity"],
         "color": stage_info["color"],
         "_model": "Deterministic Baseline (Offline)",
         "_deterministic_fallback": True,
+        "model_available": False,
+        "status": "UNABLE_TO_CLASSIFY",
     }
 
 

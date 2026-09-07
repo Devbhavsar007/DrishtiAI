@@ -11,6 +11,7 @@ import logging
 import uuid
 from contextlib import contextmanager
 from datetime import datetime
+from typing import Any
 
 log = logging.getLogger("DrishtiAI.db")
 
@@ -364,11 +365,55 @@ def generate_patient_id():
             next_num += 1
 
 
-# === Patient CRUD ===
+# === Patient CRUD & Input Validation ===
+
+def validate_patient_metrics(
+    age: Any = None,
+    diabetes_duration: Any = None,
+    sugar_level: Any = None,
+    hba1c: Any = None
+) -> None:
+    """Enforce physiological and clinical validity bounds on patient measurements."""
+    if age is not None:
+        try:
+            a = int(age)
+            if a < 0 or a > 130:
+                raise ValueError(f"Patient age {a} is outside valid clinical range (0-130 years).")
+        except (TypeError, ValueError) as e:
+            raise ValueError(f"Invalid patient age: {e}")
+
+    if diabetes_duration is not None:
+        try:
+            d = float(diabetes_duration)
+            if d < 0.0 or d > 80.0:
+                raise ValueError(f"Diabetes duration {d} is outside valid clinical range (0-80 years).")
+        except (TypeError, ValueError) as e:
+            raise ValueError(f"Invalid diabetes duration: {e}")
+
+    if sugar_level is not None:
+        try:
+            s = float(sugar_level)
+            if s < 20.0 or s > 1000.0:
+                raise ValueError(f"Blood sugar level {s} mg/dL is outside valid clinical range (20-1000 mg/dL).")
+        except (TypeError, ValueError) as e:
+            raise ValueError(f"Invalid blood sugar level: {e}")
+
+    if hba1c is not None:
+        try:
+            h = float(hba1c)
+            if h < 3.0 or h > 20.0:
+                raise ValueError(f"HbA1c level {h}% is outside valid clinical range (3.0-20.0%).")
+        except (TypeError, ValueError) as e:
+            raise ValueError(f"Invalid HbA1c level: {e}")
+
 
 def create_patient(name, age=None, gender='', diabetes_duration=None,
                    sugar_level=None, hba1c=None, notes=''):
-    """Create a new patient record with collision-proof atomic allocation."""
+    """Create a new patient record with collision-proof atomic allocation and clinical bounds enforcement."""
+    if not name or not str(name).strip():
+        raise ValueError("Patient name cannot be empty.")
+    validate_patient_metrics(age=age, diabetes_duration=diabetes_duration, sugar_level=sugar_level, hba1c=hba1c)
+
     with get_db() as conn:
         for attempt in range(10):
             row = conn.execute("""
@@ -473,6 +518,16 @@ def update_patient(patient_id, **kwargs):
 
     if not updates:
         return get_patient(patient_id)
+
+    if "name" in updates and not str(updates["name"]).strip():
+        raise ValueError("Patient name cannot be empty.")
+
+    validate_patient_metrics(
+        age=updates.get("age"),
+        diabetes_duration=updates.get("diabetes_duration"),
+        sugar_level=updates.get("sugar_level"),
+        hba1c=updates.get("hba1c"),
+    )
 
     # Sanitize string values
     for k, v in updates.items():
@@ -733,12 +788,34 @@ def save_doctor_review(
     clinical_notes: str = "",
     recommended_intervention: str = ""
 ) -> dict:
-    """Record clinician evaluation/sign-off and update referral triage status."""
+    """Record clinician evaluation/sign-off with strict validation and update referral triage status."""
+    if not doctor_id or not str(doctor_id).strip():
+        raise ValueError("doctor_id is required for clinician review.")
+
+    decision_clean = str(decision).upper().strip()
+    if decision_clean not in ("APPROVED", "MODIFIED", "REJECTED_RETAKE"):
+        raise ValueError(f"Invalid review decision: '{decision}'. Must be APPROVED, MODIFIED, or REJECTED_RETAKE.")
+
+    orig_stage = int(original_stage)
+    if orig_stage < 0 or orig_stage > 4:
+        raise ValueError(f"Invalid original_stage: {orig_stage}. Must be in range 0-4.")
+
+    adj_stage = None
+    if adjusted_stage is not None:
+        adj_stage = int(adjusted_stage)
+        if adj_stage < 0 or adj_stage > 4:
+            raise ValueError(f"Invalid adjusted_stage: {adj_stage}. Must be in range 0-4.")
+
+    priority_clean = str(approved_priority).upper().strip()
+    if priority_clean not in ("ROUTINE", "EARLY", "URGENT", "EMERGENCY"):
+        raise ValueError(f"Invalid approved_priority: '{approved_priority}'. Must be ROUTINE, EARLY, URGENT, or EMERGENCY.")
+
     review_id = f"rev-{uuid.uuid4().hex[:12]}"
-    decision_clean = str(decision).upper()
-    priority_clean = str(approved_priority).upper()
 
     with get_db() as conn:
+        p_row = conn.execute("SELECT id FROM patients WHERE id = ?", (patient_id,)).fetchone()
+        if not p_row:
+            raise ValueError(f"Patient '{patient_id}' not found in database.")
         conn.execute(
             """INSERT OR REPLACE INTO doctor_reviews
                (id, scan_id, patient_id, doctor_id, doctor_name, decision,
@@ -918,6 +995,16 @@ def reconcile_sync_batch(incoming_events: list[dict]) -> dict:
             action = str(evt.get("action", "UPDATE")).upper()
             payload = evt.get("payload") or {}
             incoming_version = int(evt.get("version", 1))
+
+            # Idempotency check: if event_id or exact (entity_id, version) already processed
+            already = conn.execute(
+                "SELECT sync_status FROM sync_events WHERE id = ? OR (entity_id = ? AND version = ? AND sync_status = 'SYNCED')",
+                (event_id, entity_id, incoming_version)
+            ).fetchone()
+            if already and already["sync_status"] == "SYNCED":
+                if entity_id not in synced_ids:
+                    synced_ids.append(entity_id)
+                continue
 
             # Check if local record has higher version
             existing = conn.execute(

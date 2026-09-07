@@ -20,6 +20,7 @@ from engine.safety.image_validator import ImageValidator, ImageValidationResult
 from engine.safety.ood import evaluate_ood_signal, OODResult
 from engine.safety.anatomy import assess_anatomy_and_laterality, AnatomyResult
 from app import app
+from engine.security.auth import create_access_token, Role
 import database
 
 
@@ -27,6 +28,8 @@ import database
 def client():
     app.config["TESTING"] = True
     with app.test_client() as c:
+        token = create_access_token("test-hw", Role.HEALTH_WORKER.value)
+        c.environ_base["HTTP_AUTHORIZATION"] = f"Bearer {token}"
         yield c
 
 

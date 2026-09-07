@@ -1,6 +1,7 @@
 import unittest
 import uuid
 from app import app
+from engine.security.auth import create_access_token, Role
 from database import (
     create_patient,
     delete_patient,
@@ -101,7 +102,11 @@ class TestPersistenceAndTimeline(unittest.TestCase):
 
     def test_timeline_endpoint(self):
         client = app.test_client()
-        res = client.get(f"/api/patients/{self.patient_id}/timeline")
+        token = create_access_token("test-hw", Role.HEALTH_WORKER.value)
+        res = client.get(
+            f"/api/patients/{self.patient_id}/timeline",
+            headers={"Authorization": f"Bearer {token}"}
+        )
         self.assertEqual(res.status_code, 200)
         data = res.get_json()
         self.assertTrue(data["success"])

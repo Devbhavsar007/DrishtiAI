@@ -107,7 +107,8 @@ class TestRBACAndObservability(unittest.TestCase):
 
     def test_observability_metrics_endpoint(self):
         client = app.test_client()
-        res = client.get("/api/analytics/metrics")
+        token = create_access_token("dr-sharma", Role.DOCTOR.value)
+        res = client.get("/api/analytics/metrics", headers={"Authorization": f"Bearer {token}"})
         self.assertEqual(res.status_code, 200)
         data = res.get_json()
         self.assertTrue(data["success"])

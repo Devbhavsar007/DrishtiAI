@@ -82,24 +82,43 @@ def assess_progression_risk(
             supporting_factors.append("persistent referable abnormal screening")
 
     if patient_profile:
-        hba1c = _to_float(patient_profile.get("hba1c"), 0.0)
-        duration = _to_float(patient_profile.get("diabetes_duration"), 0.0)
-        sugar = _to_float(patient_profile.get("sugar_level"), 0.0)
+        raw_hba1c = patient_profile.get("hba1c")
+        raw_duration = patient_profile.get("diabetes_duration")
+        raw_sugar = patient_profile.get("sugar_level")
 
-        if hba1c >= 9.0:
-            six_month += 0.12
-            supporting_factors.append("poor glycemic control (HbA1c >= 9.0)")
-        elif hba1c >= 8.0:
-            six_month += 0.08
-            supporting_factors.append("suboptimal glycemic control (HbA1c >= 8.0)")
+        # Explicit missing value handling (missing != 0.0)
+        if raw_hba1c is not None:
+            try:
+                hba1c = float(raw_hba1c)
+                if 3.0 <= hba1c <= 20.0:
+                    if hba1c >= 9.0:
+                        six_month += 0.12
+                        supporting_factors.append("poor glycemic control (HbA1c >= 9.0)")
+                    elif hba1c >= 8.0:
+                        six_month += 0.08
+                        supporting_factors.append("suboptimal glycemic control (HbA1c >= 8.0)")
+            except (TypeError, ValueError):
+                pass
 
-        if duration >= 10.0:
-            six_month += 0.06
-            supporting_factors.append("long diabetes duration")
+        if raw_duration is not None:
+            try:
+                duration = float(raw_duration)
+                if 0.0 <= duration <= 80.0:
+                    if duration >= 10.0:
+                        six_month += 0.06
+                        supporting_factors.append("long diabetes duration")
+            except (TypeError, ValueError):
+                pass
 
-        if sugar >= 180.0:
-            six_month += 0.05
-            supporting_factors.append("elevated blood glucose")
+        if raw_sugar is not None:
+            try:
+                sugar = float(raw_sugar)
+                if 20.0 <= sugar <= 1000.0:
+                    if sugar >= 180.0:
+                        six_month += 0.05
+                        supporting_factors.append("elevated blood glucose")
+            except (TypeError, ValueError):
+                pass
 
     uncertainty_flags: list[str] = []
     if prev_stage is None:

@@ -10,7 +10,7 @@ import uuid
 import json
 import logging
 import cv2
-from flask import Flask, request, jsonify, render_template, send_from_directory
+from flask import Flask, request, jsonify, render_template, send_from_directory, g
 from flask_cors import CORS
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
@@ -373,9 +373,16 @@ def index():
 
 
 @app.route("/results/<path:filename>")
+@require_role(Role.HEALTH_WORKER, Role.DOCTOR, Role.ADMIN, Role.PATIENT)
 def serve_result(filename):
-    """Serve generated result images."""
-    return send_from_directory(RESULTS_DIR, filename)
+    """Serve generated result images securely with path traversal protection and RBAC."""
+    safe_filename = os.path.basename(filename)
+    safe_path = os.path.abspath(os.path.join(RESULTS_DIR, safe_filename))
+    if not safe_path.startswith(os.path.abspath(RESULTS_DIR)):
+        return jsonify({"success": False, "error": "Access denied: invalid file path."}), 403
+    if not os.path.isfile(safe_path):
+        return jsonify({"success": False, "error": "File not found."}), 404
+    return send_from_directory(RESULTS_DIR, safe_filename)
 
 
 # ========================================
@@ -383,6 +390,7 @@ def serve_result(filename):
 # ========================================
 
 @app.route("/api/dashboard", methods=["GET"])
+@require_role(Role.HEALTH_WORKER, Role.DOCTOR, Role.ADMIN)
 def api_dashboard():
     """Get dashboard statistics."""
     try:
@@ -398,6 +406,7 @@ def api_dashboard():
 # ========================================
 
 @app.route("/api/patients", methods=["GET"])
+@require_role(Role.HEALTH_WORKER, Role.DOCTOR, Role.ADMIN)
 def api_patients_list():
     """List all patients with optional search."""
     try:
@@ -410,6 +419,7 @@ def api_patients_list():
 
 
 @app.route("/api/patients", methods=["POST"])
+@require_role(Role.HEALTH_WORKER, Role.DOCTOR, Role.ADMIN)
 def api_patients_create():
     """Create a new patient."""
     try:
@@ -427,12 +437,15 @@ def api_patients_create():
             notes=data.get('notes', '')
         )
         return jsonify({"success": True, "patient": patient})
+    except ValueError as ve:
+        return jsonify({"success": False, "error": str(ve)}), 400
     except Exception as e:
         log.exception("Patient create error")
         return jsonify({"success": False, "error": str(e)}), 500
 
 
 @app.route("/api/patients/<patient_id>", methods=["GET"])
+@require_role(Role.HEALTH_WORKER, Role.DOCTOR, Role.ADMIN)
 def api_patient_detail(patient_id):
     """Get patient details with scan history."""
     try:
@@ -449,6 +462,7 @@ def api_patient_detail(patient_id):
 
 
 @app.route("/api/patients/<patient_id>", methods=["PUT"])
+@require_role(Role.HEALTH_WORKER, Role.DOCTOR, Role.ADMIN)
 def api_patient_update(patient_id):
     """Update patient info."""
     try:
@@ -466,6 +480,7 @@ def api_patient_update(patient_id):
 
 
 @app.route("/api/patients/<patient_id>", methods=["DELETE"])
+@require_role(Role.HEALTH_WORKER, Role.DOCTOR, Role.ADMIN)
 def api_patient_delete(patient_id):
     """Delete a patient and all their scans."""
     try:
@@ -484,6 +499,7 @@ def api_patient_delete(patient_id):
 # ========================================
 
 @app.route("/api/scans/<scan_id>", methods=["GET"])
+@require_role(Role.HEALTH_WORKER, Role.DOCTOR, Role.ADMIN)
 def api_scan_detail(scan_id):
     """Get a single scan's full details."""
     try:
@@ -497,6 +513,7 @@ def api_scan_detail(scan_id):
 
 
 @app.route("/api/scans/<scan_id>/progression", methods=["POST"])
+@require_role(Role.HEALTH_WORKER, Role.DOCTOR, Role.ADMIN)
 def api_scan_progression(scan_id):
     """Compute deterministic progression risk for a scan using longitudinal context."""
     try:
@@ -543,6 +560,7 @@ def api_scan_progression(scan_id):
 
 
 @app.route("/api/scans/<scan_id>/triage", methods=["POST"])
+@require_role(Role.DOCTOR, Role.HEALTH_WORKER, Role.ADMIN)
 def api_scan_triage(scan_id):
     """Compute deterministic referral priority (triage) for a scan."""
     try:
@@ -551,7 +569,15 @@ def api_scan_triage(scan_id):
             return jsonify({"success": False, "error": "Scan not found."}), 404
 
         payload = request.get_json(silent=True) or {}
-        doctor_review_present = bool(payload.get("doctor_review_present", False))
+        # Zero-trust: DO NOT trust client-supplied doctor_review_present!
+        # Query canonical doctor_reviews table to verify authentic clinician sign-off
+        actual_review = get_doctor_review(scan_id)
+        doctor_review_present = bool(actual_review and actual_review.get("decision") in ("APPROVED", "MODIFIED"))
+        doctor_review_status = (
+            str(actual_review.get("decision", "APPROVED")).upper()
+            if doctor_review_present
+            else "PENDING"
+        )
 
         patient_id = scan.get("patient_id")
         previous_scans = get_patient_scans(patient_id) if patient_id else []
@@ -591,7 +617,7 @@ def api_scan_triage(scan_id):
                 scan_id=scan_id,
                 patient_id=patient_id,
                 triage_data=triage,
-                doctor_review_status="APPROVED" if doctor_review_present else "PENDING",
+                doctor_review_status=doctor_review_status,
             )
 
         return jsonify({
@@ -608,6 +634,7 @@ def api_scan_triage(scan_id):
 
 
 @app.route("/api/patients/<patient_id>/timeline", methods=["GET"])
+@require_role(Role.HEALTH_WORKER, Role.DOCTOR, Role.ADMIN)
 def api_patient_timeline(patient_id):
     """Retrieve chronological longitudinal timeline for a patient."""
     try:
@@ -621,6 +648,7 @@ def api_patient_timeline(patient_id):
 
 
 @app.route("/api/screenings/safety-check", methods=["POST"])
+@require_role(Role.HEALTH_WORKER, Role.DOCTOR, Role.ADMIN)
 def api_screening_safety():
     """Evaluate image quality, confidence, and agreement to produce a safety decision."""
     try:
@@ -658,6 +686,7 @@ def api_screening_safety():
 
 
 @app.route("/api/medical/query", methods=["POST"])
+@require_role(Role.HEALTH_WORKER, Role.DOCTOR, Role.ADMIN)
 def api_medical_query():
     """Execute grounded clinical guideline query with verified citations."""
     try:
@@ -695,17 +724,28 @@ def api_medical_query():
 
 
 @app.route("/api/scans/<scan_id>/doctor-review", methods=["POST"])
-@require_role(Role.DOCTOR, Role.ADMIN)
+@require_role(Role.DOCTOR)
 def api_scan_doctor_review(scan_id):
-    """Submit doctor sign-off / review for a screening."""
+    """Submit doctor sign-off / review for a screening with cryptographic identity binding."""
     try:
         scan = get_scan(scan_id)
         if not scan:
             return jsonify({"success": False, "error": "Scan not found."}), 404
 
         payload = request.get_json(silent=True) or {}
-        doctor_id = payload.get("doctor_id") or "DOC-ONLINE"
-        doctor_name = payload.get("doctor_name") or "Attending Ophthalmologist"
+        # Zero-trust: Sourced from verified authenticated actor, never trusted blindly from client payload
+        actor = getattr(g, "current_user", {})
+        actor_id = actor.get("actor_id", "DOC-ONLINE")
+
+        client_doc_id = payload.get("doctor_id")
+        if client_doc_id and client_doc_id != actor_id and actor.get("actor_role") != Role.ADMIN.value:
+            return jsonify({
+                "success": False,
+                "error": f"Identity mismatch: Authenticated clinician '{actor_id}' cannot sign off as '{client_doc_id}'."
+            }), 403
+
+        doctor_id = client_doc_id or actor_id
+        doctor_name = payload.get("doctor_name") or f"Dr. {actor_id}"
         decision = payload.get("decision") or "APPROVED"  # APPROVED | MODIFIED | REJECTED_RETAKE
         original_stage = int(scan.get("stage", 0))
         adjusted_stage = payload.get("adjusted_stage")
@@ -744,6 +784,7 @@ def api_scan_doctor_review(scan_id):
 
 
 @app.route("/api/scans/<scan_id>/doctor-review", methods=["GET"])
+@require_role(Role.DOCTOR, Role.HEALTH_WORKER, Role.ADMIN)
 def api_get_doctor_review(scan_id):
     """Retrieve clinician sign-off details for a scan."""
     try:
@@ -787,6 +828,7 @@ def api_auth_login():
 
 
 @app.route("/api/auth/me", methods=["GET"])
+@require_role(Role.HEALTH_WORKER, Role.DOCTOR, Role.ADMIN, Role.PATIENT)
 def api_auth_me():
     """Retrieve identity and privileges of active session actor."""
     actor = get_current_actor()
@@ -817,6 +859,7 @@ def api_sync_batch():
 
 
 @app.route("/api/sync/status", methods=["GET"])
+@require_role(Role.ADMIN, Role.DOCTOR, Role.HEALTH_WORKER)
 def api_sync_status():
     """Retrieve ledger synchronization health and backlog depth."""
     status = get_sync_status()
@@ -827,7 +870,7 @@ def api_sync_status():
 
 
 @app.route("/api/sync/pending", methods=["GET"])
-@require_role(Role.ADMIN, Role.HEALTH_WORKER)
+@require_role(Role.ADMIN, Role.DOCTOR)
 def api_sync_pending():
     """Retrieve pending sync events for local device synchronization."""
     device_id = request.args.get("device_id")
@@ -845,6 +888,7 @@ def api_sync_pending():
 # ========================================
 
 @app.route("/api/analytics/metrics", methods=["GET"])
+@require_role(Role.HEALTH_WORKER, Role.DOCTOR, Role.ADMIN)
 def api_analytics_metrics():
     """Aggregate structured system observability, epidemiology, and referral metrics."""
     metrics = get_observability_metrics()
@@ -855,6 +899,7 @@ def api_analytics_metrics():
 
 
 @app.route("/analyze", methods=["POST"])
+@require_role(Role.HEALTH_WORKER, Role.DOCTOR, Role.ADMIN)
 @limiter.limit("10 per minute")
 def analyze():
     """
@@ -1033,6 +1078,7 @@ def analyze():
 
 
 @app.route("/translate", methods=["POST"])
+@require_role(Role.HEALTH_WORKER, Role.DOCTOR, Role.ADMIN, Role.PATIENT)
 def translate():
     """Translate an existing report to another language."""
     data = request.get_json()
@@ -1057,6 +1103,7 @@ def translate():
 # ========================================
 
 @app.route("/api/analyze-v2", methods=["POST"])
+@require_role(Role.HEALTH_WORKER, Role.DOCTOR, Role.ADMIN)
 @limiter.limit("10 per minute")
 def analyze_v2():
     """
@@ -1358,6 +1405,7 @@ def analyze_v2():
 # ========================================
 
 @app.route("/api/analyze-v3", methods=["POST"])
+@require_role(Role.HEALTH_WORKER, Role.DOCTOR, Role.ADMIN)
 @limiter.limit("10 per minute")
 def analyze_v3():
     """

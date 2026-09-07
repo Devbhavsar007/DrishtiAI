@@ -13,6 +13,7 @@ import os
 import io
 import unittest
 from app import app, limiter
+from engine.security.auth import create_access_token, Role
 import engine.gemma_report
 
 
@@ -23,6 +24,8 @@ class TestLegacyEndpointsRegression(unittest.TestCase):
         cls.limiter_was_enabled = getattr(limiter, "enabled", True)
         limiter.enabled = False
         cls.client = app.test_client()
+        token = create_access_token("test-hw", Role.HEALTH_WORKER.value)
+        cls.client.environ_base["HTTP_AUTHORIZATION"] = f"Bearer {token}"
 
         # Enforce deterministic offline report generation to avoid external API delays
         cls.original_offline = engine.gemma_report.OFFLINE_MODE

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 from engine.contracts.safety import SafetyDecision
+from engine.safety.decision_engine import SafetyDecisionEngine, SafetyEvaluationResult
+from engine.safety.image_validator import ImageValidationResult
 
 
 def _to_float(value: Any, default: float = 0.0) -> float:
@@ -21,115 +23,61 @@ def evaluate_safety(
 ) -> SafetyDecision:
     """
     Evaluate image quality, prediction confidence, and inter-model agreement
-    to produce a deterministic safety decision before triage/reporting.
-
-    Rules:
-    1. If quality is REJECT or quality_score < 0.40 -> RETAKE_REQUIRED.
-    2. If confidence < 70.0 or quality is ENHANCE (borderline) -> UNCERTAIN.
-    3. If secondary model exists and stage disagreement >= 2 -> UNCERTAIN.
-    4. When primary stage is referable (>=2), human review is always flagged.
+    by delegating directly to the unified authoritative SafetyDecisionEngine.
+    Guarantees consistent safety arbitration across all API endpoints and pipelines.
     """
     qa = quality_assessment or {}
     pred = primary_prediction or {}
     sec = secondary_prediction or {}
 
-    quality_decision = str(qa.get("decision", "ACCEPT")).upper()
-    quality_score = _to_float(qa.get("quality_score"), 0.85)
-    confidence = _to_float(pred.get("confidence"), 0.0)
-    primary_stage = int(pred.get("stage", 0) or 0)
+    q_dec = str(qa.get("decision", "ACCEPT")).upper()
+    q_score = _to_float(qa.get("quality_score"), 0.85)
 
-    reasons: list[str] = []
-    retake_guidance: str | None = None
-    human_review_required = False
+    is_valid_quality = (q_dec != "REJECT" and q_score >= 0.40)
+    image_val = ImageValidationResult(
+        valid=is_valid_quality,
+        error="Image quality rejected" if not is_valid_quality else None,
+    )
 
-    # Check image quality gate
-    if quality_decision == "REJECT" or quality_score < 0.40:
-        status = "RETAKE_REQUIRED"
-        human_review_required = True
-        reasons.append("QUALITY_REJECTED")
+    engine = SafetyDecisionEngine()
+    result: SafetyEvaluationResult = engine.evaluate(
+        image_val=image_val,
+        primary_detection=pred,
+        secondary_detection=sec,
+        quality_assessment=qa,
+    )
 
-        # Extract operator feedback from IQA
-        feedback_list = qa.get("feedback", [])
-        if feedback_list:
-            reasons.extend([f"IQA_{f.upper().replace(' ', '_')}" for f in feedback_list])
-            retake_guidance = (
-                "Fundus image quality is insufficient for screening: "
-                + "; ".join(feedback_list)
-                + ". Please clean lens, ensure steady focus, and recapture in a dim room."
-            )
-        else:
-            retake_guidance = (
-                "Image blur or illumination is below clinical diagnostic thresholds. "
-                "Please reposition camera, ask patient to keep still, and recapture."
-            )
-
-        return SafetyDecision(
-            status=status,
-            overall_quality_score=round(quality_score, 3),
-            model_confidence=round(confidence, 2),
-            reasons=sorted(set(reasons)),
-            human_review_required=True,
-            retake_guidance=retake_guidance,
-            safety_state="REJECTED",
-            automation_level="UNABLE_TO_CLASSIFY",
-            clinical_action_allowed=False,
-            screening_eligibility="INELIGIBLE",
-            metadata={"quality_decision": quality_decision},
-        )
-
-    # Borderline quality
-    if quality_decision == "ENHANCE" or quality_score < 0.65:
-        reasons.append("QUALITY_BORDERLINE")
-        human_review_required = True
-
-    # Low model confidence
-    if confidence < 70.0:
+    # Reconcile legacy reason codes for contract parity
+    reasons = list(result.reason_codes)
+    if "LOW_CONFIDENCE" in reasons:
+        reasons.remove("LOW_CONFIDENCE")
         reasons.append("LOW_MODEL_CONFIDENCE")
-        human_review_required = True
-
-    # Model agreement check if secondary model available
-    if sec and "stage" in sec:
-        sec_stage = int(sec.get("stage", 0) or 0)
-        stage_diff = abs(primary_stage - sec_stage)
-        if stage_diff >= 2:
-            reasons.append("MODEL_DISAGREEMENT_SIGNIFICANT")
-            human_review_required = True
-        elif stage_diff == 1:
-            reasons.append("MODEL_DISAGREEMENT_MINOR")
-
-    # High severity automatically mandates human clinician verification
-    if primary_stage >= 2:
+    if "MODEL_DISAGREEMENT" in reasons:
+        reasons.remove("MODEL_DISAGREEMENT")
+        reasons.append("MODEL_DISAGREEMENT_SIGNIFICANT")
+    if "REFERABLE_DR_DETECTED" in reasons:
+        reasons.remove("REFERABLE_DR_DETECTED")
         reasons.append("REFERABLE_GRADE_VERIFICATION")
-        human_review_required = True
-
-    # Decide status
-    if "QUALITY_BORDERLINE" in reasons or "LOW_MODEL_CONFIDENCE" in reasons or "MODEL_DISAGREEMENT_SIGNIFICANT" in reasons:
-        status = "UNCERTAIN"
-        safety_state = "UNCERTAIN"
-        automation_level = "HUMAN_REVIEW_REQUIRED"
-        screening_eligibility = "REQUIRES_CONFIRMATION"
-        clinical_action_allowed = False
-        retake_guidance = (
-            "Screening confidence is borderline. Clinician inspection of raw fundus image is recommended."
-        )
-    else:
-        status = "PROCEED"
-        safety_state = "VERIFIED"
-        automation_level = "AUTOMATED_ASSISTANCE"
-        screening_eligibility = "ELIGIBLE"
-        clinical_action_allowed = True
+    if not reasons and result.safety_state == "VERIFIED":
         reasons.append("SCREENING_VALID")
 
+    retake_guidance = result.mitigation_instructions
+    if result.status == "UNCERTAIN" and not retake_guidance:
+        retake_guidance = "Screening confidence is borderline. Clinician inspection of raw fundus image is recommended."
+
+    primary_stage = int(pred.get("stage", 0) or 0)
+    confidence = _to_float(pred.get("confidence"), 0.0)
+
     return SafetyDecision(
-        status=status,
-        overall_quality_score=round(quality_score, 3),
+        status=result.status,
+        overall_quality_score=round(q_score, 3),
         model_confidence=round(confidence, 2),
         reasons=sorted(set(reasons)),
-        human_review_required=human_review_required,
+        human_review_required=result.human_review_required,
         retake_guidance=retake_guidance,
-        safety_state=safety_state,
-        automation_level=automation_level,
-        clinical_action_allowed=clinical_action_allowed,
-        screening_eligibility=screening_eligibility,
-        metadata={"primary_stage": primary_stage, "quality_decision": quality_decision},
+        safety_state=result.safety_state,
+        automation_level=result.automation_level,
+        clinical_action_allowed=result.clinical_action_allowed,
+        screening_eligibility=result.screening_eligibility,
+        metadata={"primary_stage": primary_stage, "quality_decision": q_dec, "engine": "SafetyDecisionEngine"},
     )

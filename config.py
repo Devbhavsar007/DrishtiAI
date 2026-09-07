@@ -52,6 +52,8 @@ if _env_secret in _INSECURE_DEFAULTS:
 else:
     FLASK_SECRET = _env_secret
 
+EDGE_DEVICE_SECRET = os.getenv("EDGE_DEVICE_SECRET", FLASK_SECRET)
+
 # ---------------------------------------------------------------------------
 # Model Paths
 # ---------------------------------------------------------------------------

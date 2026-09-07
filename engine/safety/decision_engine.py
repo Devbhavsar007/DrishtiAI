@@ -40,6 +40,34 @@ class SafetyEvaluationResult:
     mitigation_instructions: Optional[str] = None
     audit_metadata: Dict[str, Any] = field(default_factory=dict)
 
+    @property
+    def status(self) -> str:
+        """Backwards-compatibility status string for clinical callers."""
+        if self.safety_state == "REJECTED":
+            return "RETAKE_REQUIRED"
+        if self.safety_state == "UNCERTAIN" or self.human_review_required or not self.clinical_action_allowed:
+            return "UNCERTAIN"
+        return "PROCEED"
+
+    @property
+    def overall_quality_score(self) -> float:
+        return float(self.audit_metadata.get("quality_score", 0.95))
+
+    @property
+    def model_confidence(self) -> float:
+        return self.confidence_score
+
+    @property
+    def reasons(self) -> List[str]:
+        res = list(self.reason_codes)
+        if not res and self.safety_state == "VERIFIED":
+            res.append("SCREENING_VALID")
+        return res
+
+    @property
+    def retake_guidance(self) -> Optional[str]:
+        return self.mitigation_instructions
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "screening_eligibility": self.screening_eligibility,
@@ -58,7 +86,7 @@ class SafetyEvaluationResult:
 
 class SafetyDecisionEngine:
     """
-    Central safety arbitrator.
+    Central authoritative safety arbitrator for DrishtiAI.
     Separates evidence collection (probabilistic AI) from decision policy (deterministic).
     """
 
@@ -74,17 +102,42 @@ class SafetyDecisionEngine:
         ood_res: Optional[OODResult] = None,
         primary_detection: Optional[Dict[str, Any]] = None,
         secondary_detection: Optional[Dict[str, Any]] = None,
+        quality_assessment: Optional[Dict[str, Any]] = None,
         operator_id: Optional[str] = None,
         patient_id: Optional[str] = None,
     ) -> SafetyEvaluationResult:
         """
-        Arbitrate all clinical and image signals.
+        Arbitrate all clinical, image, and model signals into a deterministic decision.
         """
         audit_meta = {
             "operator_id": operator_id,
             "patient_id": patient_id,
             "thresholds": self.thresholds,
         }
+
+        # ── Gate 0: Image Quality Assessment (IQA Gate) ──
+        if quality_assessment:
+            q_dec = str(quality_assessment.get("decision", "ACCEPT")).upper()
+            q_score = float(quality_assessment.get("quality_score", 0.85))
+            audit_meta["quality_score"] = q_score
+            if q_dec == "REJECT" or q_score < 0.40:
+                feedback = quality_assessment.get("feedback", [])
+                reasons = ["QUALITY_REJECTED"]
+                if feedback:
+                    reasons.extend([f"IQA_{f.upper().replace(' ', '_')}" for f in feedback])
+                    guidance = "Fundus image quality is insufficient for screening: " + "; ".join(feedback)
+                else:
+                    guidance = "Image blur or illumination is below clinical diagnostic thresholds. Please recapture."
+                return SafetyEvaluationResult(
+                    screening_eligibility="INELIGIBLE",
+                    safety_state="REJECTED",
+                    automation_level="UNABLE_TO_CLASSIFY",
+                    human_review_required=True,
+                    confidence_score=float(primary_detection.get("confidence", 0.0)) if primary_detection else 0.0,
+                    reason_codes=sorted(list(set(reasons))),
+                    mitigation_instructions=guidance,
+                    audit_metadata=audit_meta,
+                )
 
         # ── Gate 1: Hard Image Validation Failures ──
         if not image_val.valid:
@@ -117,6 +170,14 @@ class SafetyDecisionEngine:
         instructions: List[str] = []
         eligibility = "ELIGIBLE"
 
+        # 0. Borderline quality check
+        if quality_assessment:
+            q_dec = str(quality_assessment.get("decision", "ACCEPT")).upper()
+            q_score = float(quality_assessment.get("quality_score", 0.85))
+            if q_dec == "ENHANCE" or q_score < 0.65:
+                reason_codes.append("QUALITY_BORDERLINE")
+                instructions.append("Image quality is borderline; manual confirmation suggested.")
+
         # 1. Laterality Check
         if anatomy_res and anatomy_res.laterality_mismatch:
             reason_codes.append("LATERALITY_MISMATCH_SUSPECTED")
@@ -142,18 +203,29 @@ class SafetyDecisionEngine:
                 reason_codes.append("DUPLICATE_IMAGE_SUBMISSION")
                 instructions.append("Duplicate image submission detected.")
 
-        # 5. Primary Model Confidence
+        # 5. Primary Model Output & Fallback Masking Prevention
         primary_conf = 0.0
         primary_stage = None
         if primary_detection:
             primary_conf = float(primary_detection.get("confidence", 0.0))
             primary_stage = primary_detection.get("stage")
+
+            # Check if deterministic fallback / mock is active
+            if primary_detection.get("_deterministic_fallback") or primary_detection.get("model_available") is False:
+                reason_codes.append("MODEL_FALLBACK_ACTIVE")
+                instructions.append("Model weights unavailable: deterministic synthetic baseline active. Cannot be cleared without physician grading.")
+
             if primary_conf < self.thresholds["min_confidence"]:
                 reason_codes.append("LOW_CONFIDENCE")
                 instructions.append(
                     f"AI detection confidence ({primary_conf:.1f}%) is below minimum screening threshold "
                     f"({self.thresholds['min_confidence']}%)."
                 )
+
+            # Referable disease requires human clinician sign-off
+            if primary_stage is not None and int(primary_stage) >= 2:
+                reason_codes.append("REFERABLE_DR_DETECTED")
+                instructions.append(f"Referable DR detected (Stage {primary_stage}); ophthalmology clinical review required.")
 
         # 6. Multi-Model Consensus / Disagreement
         if primary_detection and secondary_detection:
@@ -183,6 +255,9 @@ class SafetyDecisionEngine:
             "LOW_CONFIDENCE",
             "OOD_SUSPECTED",
             "LATERALITY_MISMATCH_SUSPECTED",
+            "MODEL_FALLBACK_ACTIVE",
+            "QUALITY_BORDERLINE",
+            "REFERABLE_DR_DETECTED",
         }
 
         has_critical_issue = any(rc in critical_reasons for rc in reason_codes)

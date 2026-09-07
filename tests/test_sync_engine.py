@@ -2,7 +2,9 @@
 
 import unittest
 import uuid
+import time
 from app import app
+from engine.security.auth import create_access_token, Role, create_edge_signature
 from database import (
     record_sync_event,
     get_pending_sync_events,
@@ -85,15 +87,28 @@ class TestSyncEngine(unittest.TestCase):
 
     def test_sync_api_endpoints(self):
         client = app.test_client()
+        hw_token = create_access_token("hw-1", Role.HEALTH_WORKER.value)
 
         # Status check
-        status_res = client.get("/api/sync/status")
+        status_res = client.get(
+            "/api/sync/status",
+            headers={"Authorization": f"Bearer {hw_token}"}
+        )
         self.assertEqual(status_res.status_code, 200)
         status_data = status_res.get_json()
         self.assertTrue(status_data["success"])
         self.assertIn("is_synced", status_data["status"])
 
-        # Batch reconciliation endpoint with edge health worker header
+        # Batch reconciliation endpoint with HMAC-signed edge device headers
+        now = int(time.time())
+        sig = create_edge_signature(self.device_id, Role.HEALTH_WORKER.value, now)
+        edge_headers = {
+            "X-Drishti-Edge-Device-Id": self.device_id,
+            "X-Drishti-Edge-Role": Role.HEALTH_WORKER.value,
+            "X-Drishti-Edge-Timestamp": str(now),
+            "X-Drishti-Edge-Signature": sig,
+        }
+
         incoming_batch = {
             "events": [
                 {
@@ -109,7 +124,7 @@ class TestSyncEngine(unittest.TestCase):
         res = client.post(
             "/api/sync",
             json=incoming_batch,
-            headers={"X-Drishti-Role": "HEALTH_WORKER"}
+            headers=edge_headers
         )
         self.assertEqual(res.status_code, 200)
         data = res.get_json()

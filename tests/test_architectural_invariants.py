@@ -19,10 +19,15 @@ from engine.clinical.progression import assess_progression_risk
 from engine.clinical.referral import decide_referral
 
 
+from engine.security.auth import create_access_token, Role
+
+
 class TestArchitecturalInvariants(unittest.TestCase):
     def setUp(self):
         app.config["TESTING"] = True
         self.client = app.test_client()
+        self.token = create_access_token("test-operator", Role.HEALTH_WORKER.value)
+        self.client.environ_base["HTTP_AUTHORIZATION"] = f"Bearer {self.token}"
 
     def test_invariant_01_ai_prediction_never_directly_commits_final_clinical_action(self):
         """Invariant 1: AI prediction can NEVER directly commit a final clinical decision."""
