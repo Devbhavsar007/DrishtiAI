@@ -168,19 +168,28 @@ def _call_gemma_api(prompt, system_instruction=None, temperature=0.3, max_tokens
 
 
 def generate_report(detection_result, heatmap_analysis, vessel_stats, patient_info=None,
-                    structures=None):
+                    structures=None, safety_state=None, safety_eval=None):
     """
     Generate a comprehensive medical report.
     - OFFLINE_MODE: uses deterministic, literature-derived template report (no API)
     - ONLINE:       uses Gemma-4 API with fallback chain
+    - Authoritative safety rule: If safety_state != "VERIFIED", deterministic safety report is returned.
     """
+    effective_safety = safety_state or (safety_eval.get("safety_state") if isinstance(safety_eval, dict) else None)
+    if effective_safety and effective_safety != "VERIFIED":
+        from engine.pipeline.offline_report import generate_offline_report
+        return generate_offline_report(
+            detection_result, heatmap_analysis, vessel_stats,
+            patient_info, structures, safety_state=effective_safety,
+        )
+
     # ── Offline path: zero API calls, works in rural clinics ──
     if OFFLINE_MODE:
         print("[OFFLINE] Generating report without API (DRISHTIAI_OFFLINE=true)")
         from engine.pipeline.offline_report import generate_offline_report
         return generate_offline_report(
             detection_result, heatmap_analysis, vessel_stats,
-            patient_info, structures,
+            patient_info, structures, safety_state=effective_safety,
         )
 
     # ── Online path: Gemma API with multi-stage fallback ──

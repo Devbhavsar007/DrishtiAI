@@ -120,19 +120,45 @@ def assess_anatomy_and_laterality(
     cx, cy = disc_center
     inferred_lat = "UNKNOWN"
     confidence = 0.0
+    valid_anatomy = True
+
+    # 1.1 Optic disc boundary plausibility check: disc cannot touch the outer image edge
+    border_margin = max(10, int(0.05 * min(h, w)))
+    if cx <= border_margin or cx >= w - border_margin or cy <= border_margin or cy >= h - border_margin or disc_radius <= 0:
+        valid_anatomy = False
+        notes.append("DISC_ON_IMAGE_BOUNDARY: Optic disc candidate detected on image boundary; landmark invalid.")
 
     # 2. Evaluate Laterality using Disc-Fovea spatial relationship
-    if fovea_center is not None:
+    if fovea_center is not None and valid_anatomy:
         fx, fy = fovea_center
         # In standard retinal imaging:
         # OD (Right Eye): Disc is Nasal (left side of macula/fovea in image coords: cx < fx)
         # OS (Left Eye):  Disc is Nasal (right side of macula/fovea in image coords: cx > fx)
         dx = cx - fx
-        dist = np.hypot(cx - fx, cy - fy)
+        dy = cy - fy
+        dist = np.hypot(dx, dy)
         
         # Expected disc-fovea distance is approx 2.0 to 3.5 disc diameters
         expected_dd = 2.0 * disc_radius
-        if dist > 0.8 * expected_dd:
+        
+        # Plausibility check: disc and fovea cannot overlap or be unnaturally distant
+        if dist < 0.8 * expected_dd:
+            valid_anatomy = False
+            notes.append(f"Implausible landmark geometry: optic disc and fovea overlap (dist={dist:.1f}px).")
+        elif dist > min(4.5 * expected_dd, 0.85 * min(h, w)):
+            valid_anatomy = False
+            notes.append(f"Implausible landmark geometry: disc-fovea separation exceeds anatomical limits (dist={dist:.1f}px).")
+
+        # Orientation anomaly check: disc-fovea axis is normally roughly horizontal (tilt < 35 deg)
+        # If vertical displacement strongly dominates horizontal (|dy| > 1.25 * |dx|), image is rotated (90°/270°)
+        if abs(dy) > 1.25 * max(abs(dx), 1.0) and dist > 0.8 * expected_dd:
+            valid_anatomy = False
+            notes.append(
+                f"ORIENTATION_ANOMALY_SUSPECTED: Disc-fovea axis is predominantly vertical "
+                f"(|dy|={abs(dy):.1f} > 1.25*|dx|={abs(dx):.1f}). Possible 90°/270° rotation or landmark failure."
+            )
+
+        if valid_anatomy and dist > 0.8 * expected_dd:
             if dx < -0.3 * expected_dd:
                 inferred_lat = "OD"
                 confidence = min(0.95, float(abs(dx) / (expected_dd * 2.0)))
@@ -143,22 +169,33 @@ def assess_anatomy_and_laterality(
                 inferred_lat = "UNKNOWN"
                 confidence = 0.4
                 notes.append("Disc and fovea are vertically aligned; horizontal laterality indeterminate.")
-    else:
+    elif valid_anatomy:
         # Fallback to disc quadrant if fovea is occluded
-        if cx < w * 0.45:
+        if cx < w * 0.40:
             inferred_lat = "OD"
             confidence = 0.65
             notes.append("Fovea not clearly defined; laterality inferred from disc position in nasal field.")
-        elif cx > w * 0.55:
+        elif cx > w * 0.60:
             inferred_lat = "OS"
             confidence = 0.65
             notes.append("Fovea not clearly defined; laterality inferred from disc position in nasal field.")
+        else:
+            inferred_lat = "UNKNOWN"
+            confidence = 0.20
+            notes.append("Fovea not clearly defined and disc is centered; laterality indeterminate.")
+
+    if not valid_anatomy:
+        inferred_lat = "UNKNOWN"
+        confidence = 0.0
 
     # 3. Hierarchy Check: Compare Inferred vs Operator
     mismatch = False
     requires_confirmation = False
 
-    if norm_operator_eye and inferred_lat != "UNKNOWN":
+    if not valid_anatomy:
+        requires_confirmation = True
+        notes.append("Anatomical landmarks unverified; human review required.")
+    elif norm_operator_eye and inferred_lat != "UNKNOWN":
         if norm_operator_eye == inferred_lat:
             notes.append(f"Laterality verified consistent: Operator={norm_operator_eye}, Inferred={inferred_lat}.")
         elif confidence >= 0.70:
@@ -178,10 +215,10 @@ def assess_anatomy_and_laterality(
             )
 
     return AnatomyResult(
-        valid_anatomy=True,
-        disc_center=disc_center,
-        disc_radius=disc_radius,
-        fovea_center=fovea_center,
+        valid_anatomy=valid_anatomy,
+        disc_center=disc_center if valid_anatomy else None,
+        disc_radius=disc_radius if valid_anatomy else 0,
+        fovea_center=fovea_center if valid_anatomy else None,
         inferred_laterality=inferred_lat,
         operator_selected_eye=norm_operator_eye,
         laterality_confidence=confidence,

@@ -22,7 +22,7 @@ _patient_id_lock = threading.Lock()
 # ---------------------------------------------------------------------------
 # Validation helpers
 # ---------------------------------------------------------------------------
-_PATIENT_ID_RE = re.compile(r"^P-\d{4}$")
+_PATIENT_ID_RE = re.compile(r"^P-\d{4,}$")
 _ALLOWED_PATIENT_COLS = frozenset(
     ['name', 'age', 'gender', 'diabetes_duration', 'sugar_level', 'hba1c', 'notes']
 )
@@ -612,14 +612,58 @@ def delete_patient(patient_id):
         conn.commit()
 
 
-# === Scan CRUD ===
+# === Workflow Consistency & Scan CRUD ===
+
+def check_workflow_image_consistency(
+    image_hash: str,
+    dhash: str = "",
+    patient_id: str = "",
+    session_id: str | None = None,
+    eye: str | None = None,
+) -> list[str]:
+    """
+    Detect workflow-level discrepancies:
+    - Same image attached to two different patients
+    - Same image attached to two conflicting laterality eyes (OD vs OS)
+    - Prior study reused in new session
+    """
+    warnings = []
+    if not image_hash and not dhash:
+        return warnings
+
+    with get_db() as conn:
+        if image_hash:
+            rows = conn.execute(
+                "SELECT id, patient_id, laterality, created_at FROM scans WHERE image_hash = ?",
+                (image_hash,)
+            ).fetchall()
+            for r in rows:
+                if patient_id and r["patient_id"] != patient_id:
+                    warnings.append(
+                        f"WORKFLOW_CROSS_PATIENT_DUPLICATE: CROSS_PATIENT_DUPLICATE_IMAGE_DETECTED - Image hash matches scan {r['id']} of patient {r['patient_id']}."
+                    )
+                if eye and r["laterality"] and str(eye).upper() != str(r["laterality"]).upper():
+                    warnings.append(
+                        f"WORKFLOW_LATERALITY_STUDY_CONFLICT: CROSS_EYE_IMAGE_REUSE_DETECTED - Image previously submitted as {r['laterality']} for scan {r['id']}."
+                    )
+
+    return list(set(warnings))
+
 
 def save_scan(scan_id, patient_id, detection_result, heatmap_analysis,
               vessel_stats, report, image_paths, processing_time,
               laterality='OD', operator_id='operator-1', safety_state='VERIFIED',
               automation_level='AUTOMATED_ASSISTANCE', reason_codes=None,
               image_hash='', device_id='LOCAL-EDGE-01', screening_state='FINALIZED'):
-    """Save a completed scan to the database."""
+    """Save a completed scan to the database idempotently with safety invariants."""
+    # Persistence Invariant: Unsafe scans cannot be persisted as normal cleared diagnoses
+    if safety_state in ("MODEL_FAILURE", "ANATOMY_FAILED", "QUALITY_FAILED", "REJECTED"):
+        detection_result = dict(detection_result)
+        detection_result["stage_name"] = f"Ungradeable ({safety_state})"
+        automation_level = "UNABLE_TO_CLASSIFY"
+        if screening_state == "FINALIZED":
+            screening_state = "RECOVERY_REQUIRED"
+
     reason_codes_str = json.dumps(reason_codes or [])
     with get_db() as conn:
         try:
@@ -629,7 +673,29 @@ def save_scan(scan_id, patient_id, detection_result, heatmap_analysis,
                    vessel_stats, report, image_original, image_heatmap, image_vessels,
                    processing_time, laterality, operator_id, safety_state,
                    automation_level, reason_codes_json, image_hash, device_id, screening_state)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(id) DO UPDATE SET
+                       stage = excluded.stage,
+                       stage_name = excluded.stage_name,
+                       confidence = excluded.confidence,
+                       severity = excluded.severity,
+                       color = excluded.color,
+                       all_probabilities = excluded.all_probabilities,
+                       model_used = excluded.model_used,
+                       heatmap_analysis = excluded.heatmap_analysis,
+                       vessel_stats = excluded.vessel_stats,
+                       report = excluded.report,
+                       image_original = excluded.image_original,
+                       image_heatmap = excluded.image_heatmap,
+                       image_vessels = excluded.image_vessels,
+                       processing_time = excluded.processing_time,
+                       laterality = excluded.laterality,
+                       operator_id = excluded.operator_id,
+                       safety_state = excluded.safety_state,
+                       automation_level = excluded.automation_level,
+                       reason_codes_json = excluded.reason_codes_json,
+                       image_hash = excluded.image_hash,
+                       screening_state = excluded.screening_state""",
                 (
                     scan_id, patient_id,
                     detection_result.get('stage', 0),
@@ -656,7 +722,7 @@ def save_scan(scan_id, patient_id, detection_result, heatmap_analysis,
                     screening_state,
                 )
             )
-            _audit(conn, "CREATE", "scan", scan_id,
+            _audit(conn, "CREATE_OR_UPDATE", "scan", scan_id,
                    f"patient={patient_id} stage={detection_result.get('stage', '?')}")
             conn.commit()
         except Exception as e:
@@ -744,14 +810,19 @@ def get_dashboard_stats():
 # === Progression & Referral Persistence ===
 
 def save_progression_assessment(scan_id: str, patient_id: str, progression_data: dict) -> dict:
-    """Save or update a progression assessment for a scan."""
-    assessment_id = f"prog-{uuid.uuid4().hex[:12]}"
+    """Save or update a progression assessment for a scan idempotently."""
     predicted = progression_data.get("predicted_risk") or {}
     risk_cat = str(predicted.get("risk_category", "LOW")).upper()
     six_m = float(predicted.get("six_month_risk", 0.0))
     twelve_m = float(predicted.get("twelve_month_risk", 0.0))
 
     with get_db() as conn:
+        existing = conn.execute(
+            "SELECT id FROM progression_assessments WHERE scan_id = ? ORDER BY created_at DESC LIMIT 1",
+            (scan_id,)
+        ).fetchone()
+        assessment_id = existing["id"] if existing else f"prog-{uuid.uuid4().hex[:12]}"
+
         conn.execute(
             """INSERT OR REPLACE INTO progression_assessments
                (id, scan_id, patient_id, risk_category, six_month_risk, twelve_month_risk, payload)
@@ -787,13 +858,18 @@ def save_referral(
     doctor_review_status: str = "PENDING",
     doctor_notes: str = ""
 ) -> dict:
-    """Save or update referral triage record for a scan."""
-    referral_id = f"ref-{uuid.uuid4().hex[:12]}"
+    """Save or update referral triage record for a scan idempotently."""
     priority = str(triage_data.get("priority", "ROUTINE")).upper()
     reason_codes = triage_data.get("reasonCodes", [])
     human_review = 1 if triage_data.get("humanReviewRequired", False) else 0
 
     with get_db() as conn:
+        existing = conn.execute(
+            "SELECT id FROM referrals WHERE scan_id = ? ORDER BY created_at DESC LIMIT 1",
+            (scan_id,)
+        ).fetchone()
+        referral_id = existing["id"] if existing else f"ref-{uuid.uuid4().hex[:12]}"
+
         conn.execute(
             """INSERT OR REPLACE INTO referrals
                (id, scan_id, patient_id, priority, reason_codes, human_review_required,

@@ -32,6 +32,68 @@ In accordance with scientific and engineering integrity, system capabilities are
 
 ---
 
+## 2B. Explicit Categorization of Operational Boundaries & Limitations
+
+To ensure absolute scientific honesty and avoid over-claiming AI diagnostic capability, all system boundaries are categorized into five distinct technical domains:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                 DRISHTIAI OPERATIONAL BOUNDARY TAXONOMY                     │
+├───────────────────────────────┬─────────────────────────────────────────────┤
+│ 1. SOFTWARE EDGE-CASE         │ Unit-tested mathematical invariants, NaN    │
+│    COVERAGE                   │ traps, schema gates, idempotency guarantees. │
+├───────────────────────────────┼─────────────────────────────────────────────┤
+│ 2. HEURISTIC SAFEGUARDS       │ Landmark geometry, vertical angle checks,   │
+│                               │ dHash perceptual duplicates, focus proxies. │
+├───────────────────────────────┼─────────────────────────────────────────────┤
+│ 3. REQUIRES CLINICAL          │ Demographic generalizability, pathology     │
+│    VALIDATION                 │ distortion tolerance, progression dynamics. │
+├───────────────────────────────┼─────────────────────────────────────────────┤
+│ 4. CAMERA SENSOR              │ Multi-hardware exposure curves, chromatic   │
+│    VALIDATION                 │ aberration, handheld smartphone adapters.   │
+├───────────────────────────────┼─────────────────────────────────────────────┤
+│ 5. OUT OF SCOPE               │ Non-DR retinal diseases, autonomous Dx,     │
+│                               │ independent medical prescription.           │
+└───────────────────────────────┴─────────────────────────────────────────────┘
+```
+
+### Category 1: Software Edge-Case Coverage (Engineered & Unit-Tested)
+* **What it covers:** Invariants enforced strictly by code logic and verified by regression test suites:
+  * IEEE 754 non-finite number traps: `NaN` and `Inf` model outputs immediately trigger `BLOCKED` with `NUMERICAL_INSTABILITY_DETECTED`.
+  * Probability distribution validation: Softmax outputs summing outside $1.0 \pm 0.05$ fail closed.
+  * Partial pipeline failure isolation: Auxiliaries (Grad-CAM, vessel segmentation, LLM narrative) fail gracefully with fallback structs without triggering HTTP 500 crashes.
+  * Persistence invariants: Ungradeable/rejected scans cannot be saved as normal cleared scans.
+  * State machine invariants: Sessions cannot transition from failure states directly to `SCREENING_COMPLETED`.
+  * Database transaction idempotency: Re-submitting identical scan IDs performs an idempotent update rather than corrupting the ledger.
+
+### Category 2: Heuristic Safeguards (Operational Filters — Not Biological Proof)
+* **What it covers:** Algorithmic rules that catch common acquisition errors but are heuristics rather than biological certainties:
+  * **Optic disc edge boundary margin (5%):** Filters cropped images or peripheral bright artifacts; does not guarantee full $45^\circ$ FOV centering.
+  * **Disc-fovea distance bounds ($[0.8\text{dd}, 4.5\text{dd}]$):** Flags landmark localization failures; does not account for severe high myopia with posterior staphyloma.
+  * **Vertical orientation displacement ($|\Delta y| > 1.25 |\Delta x|$):** Flags camera orientation anomalies ($> 51^\circ$ tilt); does not detect small $5^\circ - 15^\circ$ head tilts.
+  * **Perceptual dHash (Hamming distance $\le 6$):** Detects duplicate or re-compressed image reuse across patients; cannot detect distinct exposures of the same eye taken seconds apart.
+  * **Laplacian sharpness & illumination metrics:** Standard computer vision focus estimates; cannot distinguish cataract haze from genuine vitreous hemorrhage.
+
+### Category 3: Requires Clinical Validation (Prospective Multi-Center Trials)
+* **What it covers:** Behaviors that require formal clinical trials with institutional ethical clearance before clinical reliance:
+  * **Demographic Generalizability:** Performance on under-represented patient sub-populations, varying retinal pigmentation across South Asian ethnicities, and high-density corneal opacity cohorts.
+  * **Severe Pathological Distortion:** Performance when landmarks (fovea, disc) are obliterated by massive subretinal hemorrhage, extensive pan-retinal photocoagulation (PRP) laser scars, or cytomegalovirus retinitis.
+  * **Progression Prediction Velocity:** Validating whether HbA1c trajectory coupled with baseline stage reliably predicts 6-month progression across diverse healthcare delivery systems.
+
+### Category 4: Camera Hardware & Sensor Validation (Device-Specific Testing)
+* **What it covers:** Physical sensor variations that have not yet undergone standardized benchtop optical calibration:
+  * **Desktop Tabletop Cameras:** Topcon TRC-NW400, Zeiss Visucam, Canon CR-2.
+  * **Handheld Rural Screening Devices:** Remidio Fundus on Phone (FOP), Forus 3nethra classic/neo, Volk VistaView.
+  * **Smartphone Indirect Ophthalmoscopy:** Unstandardized smartphone camera sensors with uncalibrated LED flash intensities, rolling shutter artifacts, and non-linear ISP tone-mapping curves.
+
+### Category 5: Out of Scope (Explicit System Non-Goals)
+* **What it covers:** Boundaries where DrishtiAI is explicitly NOT permitted to operate:
+  * **Autonomous Diagnosis:** The system is an assistive screening tool, never an autonomous physician substitute.
+  * **Direct Therapeutic Prescription:** DrishtiAI never suggests drug dosages (e.g. anti-VEGF injections, insulin adjustments) or surgical interventions without human ophthalmologist orders.
+  * **Non-DR Retinal Disease Grading:** DrishtiAI is calibrated exclusively for Diabetic Retinopathy. Scans exhibiting signs of Age-Related Macular Degeneration (AMD), Retinal Vein Occlusion (RVO), Glaucomatous optic neuropathy, or Retinal Detachment are flagged as `SUSPECTED_NON_DR_PATHOLOGY` and routed to mandatory `DOCTOR_REVIEW`.
+
+---
+
 ## 3. Specific Clinical & Algorithmic Limitations
 
 ### A. Longitudinal Progression Forecasting

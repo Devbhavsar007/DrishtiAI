@@ -43,9 +43,9 @@ class SafetyEvaluationResult:
     @property
     def status(self) -> str:
         """Backwards-compatibility status string for clinical callers."""
-        if self.safety_state == "REJECTED":
+        if self.safety_state in ("REJECTED", "ANATOMY_FAILED", "QUALITY_FAILED"):
             return "RETAKE_REQUIRED"
-        if self.safety_state == "UNCERTAIN" or self.human_review_required or not self.clinical_action_allowed:
+        if self.safety_state in ("UNCERTAIN", "BLOCKED", "MODEL_FAILURE", "LATERALITY_CONFLICT", "OOD_REVIEW") or self.human_review_required or not self.clinical_action_allowed:
             return "UNCERTAIN"
         return "PROCEED"
 
@@ -165,6 +165,32 @@ class SafetyDecisionEngine:
                 audit_metadata=audit_meta,
             )
 
+        # ── Gate 2b: Retinal Landmark & Anatomy Integrity Gate ──
+        if anatomy_res and not anatomy_res.valid_anatomy:
+            reasons = ["ANATOMY_DETECTION_FAILED"]
+            for note in anatomy_res.notes:
+                if "ORIENTATION_ANOMALY" in note:
+                    reasons.append("ORIENTATION_ANOMALY_SUSPECTED")
+                elif "boundary" in note.lower():
+                    reasons.append("LANDMARK_OUT_OF_BOUNDS")
+                elif "overlap" in note.lower() or "separation" in note.lower():
+                    reasons.append("LANDMARK_GEOMETRY_IMPLAUSIBLE")
+            guidance = (
+                "Retinal anatomical landmarks (optic disc/fovea) could not be reliably established. "
+                "Image may be ungradeable, misaligned, or off-center. Retake or ophthalmology review required."
+            )
+            return SafetyEvaluationResult(
+                screening_eligibility="INELIGIBLE",
+                safety_state="ANATOMY_FAILED",
+                automation_level="UNABLE_TO_CLASSIFY",
+                human_review_required=True,
+                confidence_score=0.0,
+                clinical_action_allowed=False,
+                reason_codes=sorted(list(set(reasons))),
+                mitigation_instructions=guidance,
+                audit_metadata=audit_meta,
+            )
+
         # ── Accumulate Safety Signals and Reason Codes ──
         reason_codes: List[str] = []
         instructions: List[str] = []
@@ -197,18 +223,108 @@ class SafetyDecisionEngine:
             reason_codes.append("OOD_SUSPECTED")
             instructions.append("Image features deviate from training cohort distribution; advisory uncertainty elevated.")
 
-        # 4. Duplicate Image Warning
+        # 4. Duplicate Image & Workflow Inconsistency Warnings
         for warn in image_val.warnings:
             if "DUPLICATE_IMAGE_SUBMISSION" in warn:
                 reason_codes.append("DUPLICATE_IMAGE_SUBMISSION")
                 instructions.append("Duplicate image submission detected.")
+            if "WORKFLOW_" in warn or "CROSS_PATIENT" in warn or "STUDY_CONFLICT" in warn:
+                reason_codes.append("WORKFLOW_METADATA_INCONSISTENCY")
+                eligibility = "REQUIRES_CONFIRMATION"
+                instructions.append("Workflow anomaly: image attached to multiple patients or conflicting sessions.")
+            if "EXIF_ORIENTATION_NON_STANDARD" in warn:
+                reason_codes.append("EXIF_ORIENTATION_NON_STANDARD")
+                instructions.append("Image EXIF contains non-standard rotation/mirror tag.")
+            if "NON_DR_PATHOLOGY" in warn or "SUSPECTED_NON_DR_PATHOLOGY" in warn:
+                reason_codes.append("NON_DR_PATHOLOGY_SUSPECTED")
+                eligibility = "INELIGIBLE"
+                instructions.append("Suspected non-DR retinal pathology detected; ophthalmologist review mandatory.")
 
         # 5. Primary Model Output & Fallback Masking Prevention
         primary_conf = 0.0
         primary_stage = None
         if primary_detection:
-            primary_conf = float(primary_detection.get("confidence", 0.0))
+            import math
+            raw_conf = primary_detection.get("confidence")
             primary_stage = primary_detection.get("stage")
+
+            # Numerical stability / IEEE 754 check
+            try:
+                primary_conf = float(raw_conf) if raw_conf is not None else 0.0
+            except (ValueError, TypeError):
+                primary_conf = float('nan')
+
+            if math.isnan(primary_conf) or math.isinf(primary_conf):
+                return SafetyEvaluationResult(
+                    screening_eligibility="INELIGIBLE",
+                    safety_state="BLOCKED",
+                    automation_level="UNABLE_TO_CLASSIFY",
+                    human_review_required=True,
+                    confidence_score=0.0,
+                    clinical_action_allowed=False,
+                    reason_codes=["NUMERICAL_INSTABILITY_DETECTED", "MODEL_OUTPUT_INVALID"],
+                    mitigation_instructions="Model inference produced non-finite numerical output (NaN/Inf). Retake or restart engine.",
+                    audit_metadata=audit_meta,
+                )
+
+            # Stage validity check
+            if primary_stage is not None:
+                try:
+                    int_stage = int(primary_stage)
+                    if int_stage not in (0, 1, 2, 3, 4):
+                        return SafetyEvaluationResult(
+                            screening_eligibility="INELIGIBLE",
+                            safety_state="BLOCKED",
+                            automation_level="UNABLE_TO_CLASSIFY",
+                            human_review_required=True,
+                            confidence_score=primary_conf,
+                            clinical_action_allowed=False,
+                            reason_codes=["INVALID_STAGE_INDEX", "MODEL_OUTPUT_INVALID"],
+                            mitigation_instructions=f"Model output invalid stage index ({primary_stage}).",
+                            audit_metadata=audit_meta,
+                        )
+                except (ValueError, TypeError):
+                    return SafetyEvaluationResult(
+                        screening_eligibility="INELIGIBLE",
+                        safety_state="BLOCKED",
+                        automation_level="UNABLE_TO_CLASSIFY",
+                        human_review_required=True,
+                        confidence_score=primary_conf,
+                        clinical_action_allowed=False,
+                        reason_codes=["INVALID_STAGE_FORMAT", "MODEL_OUTPUT_INVALID"],
+                        mitigation_instructions="Model stage is non-integer or malformed.",
+                        audit_metadata=audit_meta,
+                    )
+
+            # Probability distribution sum sanity check
+            probs = primary_detection.get("all_probabilities")
+            if isinstance(probs, dict) and probs:
+                try:
+                    prob_vals = [float(v) for v in probs.values()]
+                    p_sum = sum(prob_vals)
+                    if p_sum > 2.0:
+                        if abs(p_sum - 100.0) > 10.0:
+                            reason_codes.append("PROBABILITY_DISTRIBUTION_UNNORMALIZED")
+                    else:
+                        if abs(p_sum - 1.0) > 0.10:
+                            reason_codes.append("PROBABILITY_DISTRIBUTION_UNNORMALIZED")
+                except Exception:
+                    pass
+
+            # Check if model failure without fallback
+            if primary_detection.get("model_available") is False or primary_detection.get("primary_failure") is True:
+                if not primary_detection.get("fallback_used"):
+                    return SafetyEvaluationResult(
+                        screening_eligibility="INELIGIBLE",
+                        safety_state="MODEL_FAILURE",
+                        automation_level="UNABLE_TO_CLASSIFY",
+                        human_review_required=True,
+                        confidence_score=0.0,
+                        clinical_action_allowed=False,
+                        reason_codes=["MODEL_FAILURE"],
+                        mitigation_instructions="Primary AI inference failed to complete. No clinical prediction available.",
+                        audit_metadata=audit_meta,
+                    )
 
             # Check if deterministic fallback / mock is active
             if (
@@ -230,6 +346,14 @@ class SafetyDecisionEngine:
             if primary_stage is not None and int(primary_stage) >= 2:
                 reason_codes.append("REFERABLE_DR_DETECTED")
                 instructions.append(f"Referable DR detected (Stage {primary_stage}); ophthalmology clinical review required.")
+
+            # Suspected non-DR pathology flag
+            if primary_detection.get("suspected_non_dr_pathology"):
+                reason_codes.append("NON_DR_PATHOLOGY_SUSPECTED")
+                instructions.append(
+                    "Possible non-diabetic retinal abnormality detected. "
+                    "DrishtiAI screening is limited to DR; specialist review required."
+                )
 
         # 6. Multi-Model Consensus / Disagreement
         if primary_detection and secondary_detection:
@@ -262,11 +386,19 @@ class SafetyDecisionEngine:
             "MODEL_FALLBACK_ACTIVE",
             "QUALITY_BORDERLINE",
             "REFERABLE_DR_DETECTED",
+            "WORKFLOW_METADATA_INCONSISTENCY",
+            "NON_DR_PATHOLOGY_SUSPECTED",
+            "PROBABILITY_DISTRIBUTION_UNNORMALIZED",
+            "EXIF_ORIENTATION_NON_STANDARD",
         }
 
         has_critical_issue = any(rc in critical_reasons for rc in reason_codes)
 
-        if has_critical_issue:
+        if "NON_DR_PATHOLOGY_SUSPECTED" in reason_codes:
+            safety_state = "OOD_REVIEW"
+            automation_level = "HUMAN_REVIEW_REQUIRED"
+            human_review_required = True
+        elif has_critical_issue:
             safety_state = "UNCERTAIN"
             automation_level = "HUMAN_REVIEW_REQUIRED"
             human_review_required = True

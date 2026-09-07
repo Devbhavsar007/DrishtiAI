@@ -971,14 +971,16 @@ export const NewScanView: React.FC = () => {
                   Safety State
                 </span>
                 <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-black ${
-                  (activeScan.safety_state || 'PASS') === 'PASS' || (activeScan.safety_state || 'PASS') === 'VERIFIED'
+                  (activeScan.safety_state || 'PASS') === 'PASS' || activeScan.safety_state === 'VERIFIED'
                     ? 'bg-emerald-100 text-emerald-800'
-                    : (activeScan.safety_state || 'PASS') === 'REJECTED' || (activeScan.safety_state || 'PASS') === 'BLOCKED'
+                    : ['REJECTED', 'BLOCKED', 'ANATOMY_FAILED', 'QUALITY_FAILED', 'MODEL_FAILURE'].includes(activeScan.safety_state || '')
                     ? 'bg-rose-100 text-rose-800'
                     : 'bg-amber-100 text-amber-800'
                 }`}>
-                  {(activeScan.safety_state || 'PASS') === 'PASS' ? (
+                  {(activeScan.safety_state || 'PASS') === 'PASS' || activeScan.safety_state === 'VERIFIED' ? (
                     <CheckCircle2 className="w-3.5 h-3.5 text-emerald-700" />
+                  ) : ['REJECTED', 'BLOCKED', 'ANATOMY_FAILED', 'QUALITY_FAILED', 'MODEL_FAILURE'].includes(activeScan.safety_state || '') ? (
+                    <AlertOctagon className="w-3.5 h-3.5 text-rose-700" />
                   ) : (
                     <AlertTriangle className="w-3.5 h-3.5 text-amber-700" />
                   )}
@@ -1055,7 +1057,7 @@ export const NewScanView: React.FC = () => {
             )}
 
             {/* Warning if Review is Required */}
-            {(activeScan.safety_state === 'UNCERTAIN' || activeScan.safety_state === 'BLOCKED' || activeScan.safety_state === 'REJECTED') && (
+            {(activeScan.safety_state && activeScan.safety_state !== 'PASS' && activeScan.safety_state !== 'VERIFIED') && (
               <div className="p-3.5 rounded-2xl bg-amber-50 border border-amber-300 flex items-start gap-2.5 text-xs text-amber-950">
                 <AlertTriangle className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
                 <div>

@@ -126,6 +126,8 @@ def generate_offline_report(
     vessel_stats: dict | None,
     patient_info: dict | None = None,
     structures: dict | None = None,
+    safety_state: str | None = None,
+    safety_eval: dict | None = None,
 ) -> tuple[dict, str]:
     """
     Generate a complete report offline using deterministic rules.
@@ -133,6 +135,48 @@ def generate_offline_report(
     Returns:
         (report_dict, source_description)
     """
+    # Authoritative safety override: Never claim normal/healthy when safety is not verified
+    effective_safety = safety_state or (safety_eval.get("safety_state") if isinstance(safety_eval, dict) else None)
+    if effective_safety and effective_safety != "VERIFIED":
+        return {
+            "current_diagnosis": {
+                "stage": -1,
+                "stage_name": f"Inconclusive ({effective_safety})",
+                "confidence": "N/A",
+                "plain_language": (
+                    f"Automated AI screening could not establish a reliable clinical result (Safety State: {effective_safety}). "
+                    "This screening must NOT be interpreted as normal or negative. "
+                    "Clinical evaluation by an ophthalmologist or image recapture is required."
+                ),
+            },
+            "visual_findings": {
+                "heatmap_summary": "Activation map unverified due to safety state.",
+                "vessel_analysis": "Vessel analysis deferred.",
+                "lesion_summary": "Lesion grading unverified.",
+            },
+            "risk_prediction": {
+                "6_month": {
+                    "progression_risk_percent": "N/A",
+                    "scenario_if_untreated": "Longitudinal prediction unavailable for inconclusive screening.",
+                    "scenario_if_managed": "Longitudinal prediction unavailable for inconclusive screening.",
+                },
+                "12_month": {
+                    "progression_risk_percent": "N/A",
+                    "scenario_if_untreated": "Longitudinal prediction unavailable for inconclusive screening.",
+                    "scenario_if_managed": "Longitudinal prediction unavailable for inconclusive screening.",
+                },
+            },
+            "action_plan": [
+                "Schedule in-person comprehensive ophthalmology examination",
+                "Do NOT rely on automated screening output for clinical discharge",
+                "Recapture retinal image if image quality or anatomical landmarks failed",
+            ],
+            "urgency": "HUMAN_REVIEW_REQUIRED",
+            "recommended_follow_up": "Ophthalmology clinical review or immediate recapture",
+            "_offline_fallback": True,
+            "_source": "deterministic_safety_fallback",
+        }, "Offline deterministic safety report"
+
     stage = detection_result["stage"]
     stage_info = DR_STAGES.get(stage, DR_STAGES[0])
     rates = _PROGRESSION_RATES[stage]

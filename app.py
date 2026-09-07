@@ -155,7 +155,7 @@ def inject_security_headers(response):
 # ---------------------------------------------------------------------------
 # Input validation helpers
 # ---------------------------------------------------------------------------
-_PATIENT_ID_RE = re.compile(r"^P-\d{4}$")
+_PATIENT_ID_RE = re.compile(r"^P-\d{4,}$")
 
 def _validate_pid(pid: str) -> str:
     """Validate patient ID format or raise 400."""
@@ -1108,6 +1108,18 @@ def analyze():
         operator_eye = request.form.get("eye")
         anatomy_res = assess_anatomy_and_laterality(raw_bgr, operator_eye=operator_eye)
 
+        # Workflow Consistency Verification
+        from database import check_workflow_image_consistency
+        wf_warns = check_workflow_image_consistency(
+            image_hash=val_result.image_hash,
+            dhash=getattr(val_result, "dhash", ""),
+            patient_id=patient_id,
+            session_id=session_id,
+            eye=operator_eye,
+        )
+        if wf_warns:
+            val_result.warnings.extend(wf_warns)
+
         # --- 2. Preprocess Image ---
         processed = preprocess_for_display(filepath)
         model_input = processed["model_input"]
@@ -1136,11 +1148,16 @@ def analyze():
         # Update session state if session_id is active
         if session_id:
             try:
-                target_state = (
-                    ScreeningState.SCREENING_COMPLETED
-                    if safety_eval.safety_state == "VERIFIED"
-                    else ScreeningState.SCREENING_UNCERTAIN
-                )
+                if safety_eval.safety_state == "ANATOMY_FAILED":
+                    target_state = ScreeningState.ANATOMY_FAILED
+                elif safety_eval.safety_state == "QUALITY_FAILED":
+                    target_state = ScreeningState.QUALITY_FAILED
+                elif safety_eval.safety_state == "MODEL_FAILURE":
+                    target_state = ScreeningState.MODEL_FAILURE
+                elif safety_eval.safety_state == "VERIFIED":
+                    target_state = ScreeningState.SCREENING_COMPLETED
+                else:
+                    target_state = ScreeningState.SCREENING_UNCERTAIN
                 update_screening_session_state(
                     session_id=session_id,
                     new_state=target_state,
@@ -1151,32 +1168,91 @@ def analyze():
             except Exception as se_err:
                 log.warning("Could not update session state for %s: %s", session_id, se_err)
 
-        # --- 5. Generate Heatmap ---
+        # --- 5. Generate Heatmap (Auxiliary Failure Isolation) ---
         heatmap_path = os.path.join(RESULTS_DIR, f"{analysis_id}_heatmap.png")
-        heatmap_overlay, heatmap_raw = generate_gradcam(model_input, original, save_path=heatmap_path)
-        heatmap_analysis = get_heatmap_analysis(heatmap_raw)
+        try:
+            heatmap_overlay, heatmap_raw = generate_gradcam(model_input, original, save_path=heatmap_path)
+            heatmap_analysis = get_heatmap_analysis(heatmap_raw)
+        except Exception as cam_err:
+            log.warning("Grad-CAM generation failed (auxiliary): %s", cam_err)
+            heatmap_overlay, heatmap_raw = None, None
+            heatmap_analysis = {
+                "status": "EXPLANATION_UNAVAILABLE",
+                "most_affected_region": "central",
+                "activity_intensity": "moderate",
+                "region_scores": {},
+                "explanation_available": False,
+            }
 
-        # --- 6. Vessel Segmentation ---
+        # --- 6. Vessel Segmentation (Auxiliary Failure Isolation) ---
         vessel_path = os.path.join(RESULTS_DIR, f"{analysis_id}_vessels.png")
-        vessel_map, vessel_stats = segment_vessels(original, save_path=vessel_path)
+        try:
+            vessel_map, vessel_stats = segment_vessels(original, save_path=vessel_path)
+        except Exception as seg_err:
+            log.warning("Vessel segmentation failed (auxiliary): %s", seg_err)
+            vessel_map = None
+            vessel_stats = {
+                "status": "VESSELS_UNAVAILABLE",
+                "vessel_density_percent": 0.0,
+                "vessel_health_text": "Vessel segmentation unavailable.",
+                "vessel_available": False,
+            }
 
-        # --- 7. Gemma Report ---
-        report, _raw_gemma = generate_report(
-            detection_result, heatmap_analysis, vessel_stats, patient_info
-        )
+        # --- 7. Gemma Report (Authoritative Safety Reflection) ---
+        try:
+            report, _raw_gemma = generate_report(
+                detection_result, heatmap_analysis, vessel_stats, patient_info,
+                safety_state=safety_eval.safety_state, safety_eval=safety_eval.to_dict()
+            )
+        except Exception as rep_err:
+            log.warning("Report generation failed (auxiliary): %s", rep_err)
+            report = {
+                "status": "REPORT_UNAVAILABLE",
+                "current_diagnosis": {
+                    "stage": detection_result.get("stage", -1),
+                    "stage_name": detection_result.get("stage_name", "Unknown"),
+                    "plain_language": "Diagnostic narrative report generation unavailable.",
+                },
+                "urgency": "HUMAN_REVIEW_REQUIRED",
+            }
+            _raw_gemma = str(rep_err)
 
         elapsed = round(time.time() - start_time, 2)
         log.info("Analysis %s completed in %.2fs — stage %s (Safety: %s)",
                  analysis_id, elapsed, detection_result.get('stage', '?'), safety_eval.safety_state)
 
+        # Update session state if session_id is active
+        if session_id:
+            try:
+                if safety_eval.safety_state == "ANATOMY_FAILED":
+                    target_state = ScreeningState.ANATOMY_FAILED
+                elif safety_eval.safety_state == "QUALITY_FAILED":
+                    target_state = ScreeningState.QUALITY_FAILED
+                elif safety_eval.safety_state == "MODEL_FAILURE":
+                    target_state = ScreeningState.MODEL_FAILURE
+                elif safety_eval.safety_state == "VERIFIED":
+                    target_state = ScreeningState.SCREENING_COMPLETED
+                else:
+                    target_state = ScreeningState.SCREENING_UNCERTAIN
+                update_screening_session_state(
+                    session_id=session_id,
+                    new_state=target_state,
+                    actor_id=verified_operator,
+                    reason=f"Inference complete (safety: {safety_eval.safety_state})",
+                    validate_transition=False,
+                )
+            except Exception as se_err:
+                log.warning("Could not update session state for %s: %s", session_id, se_err)
+
         # --- 8. Save to Database (Safety before commit) ---
         image_paths = {
             "original": f"/results/{analysis_id}_scan.png",
-            "heatmap": f"/results/{analysis_id}_heatmap.png",
-            "vessels": f"/results/{analysis_id}_vessels.png",
+            "heatmap": f"/results/{analysis_id}_heatmap.png" if heatmap_overlay is not None else "",
+            "vessels": f"/results/{analysis_id}_vessels.png" if vessel_map is not None else "",
         }
 
-        if patient_id and safety_eval.safety_state != "REJECTED":
+        persistence_status = "SKIPPED_UNSAFE"
+        if patient_id and safety_eval.safety_state not in ("REJECTED", "ANATOMY_FAILED"):
             try:
                 save_scan(
                     scan_id=analysis_id,
@@ -1187,15 +1263,17 @@ def analyze():
                     report=report,
                     image_paths=image_paths,
                     processing_time=elapsed,
-                    laterality=getattr(anatomy_res, "detected_laterality", "OD"),
+                    laterality=getattr(anatomy_res, "inferred_laterality", "OD") if anatomy_res and anatomy_res.inferred_laterality != "UNKNOWN" else (operator_eye or "OD"),
                     operator_id=verified_operator,
                     safety_state=safety_eval.safety_state,
                     automation_level=safety_eval.automation_level,
                     reason_codes=safety_eval.reason_codes,
-                    image_hash=getattr(val_result, "sha256", ""),
+                    image_hash=val_result.image_hash,
                 )
+                persistence_status = "SAVED"
                 log.info("Scan %s saved for patient %s (Safety: %s)", analysis_id, patient_id, safety_eval.safety_state)
             except Exception as db_err:
+                persistence_status = "FAILED"
                 log.warning("Failed to save scan to DB: %s", db_err)
 
         # --- 9. Compile Response ---
@@ -1210,6 +1288,7 @@ def analyze():
             "automation_level": safety_eval.automation_level,
             "clinical_action_allowed": safety_eval.clinical_action_allowed,
             "screening_eligibility": safety_eval.screening_eligibility,
+            "persistence_status": persistence_status,
             "heatmap_analysis": heatmap_analysis,
             "vessel_stats": vessel_stats,
             "report": report,
@@ -1361,6 +1440,18 @@ def analyze_v2():
         operator_eye = request.form.get("eye")
         anatomy_res = assess_anatomy_and_laterality(img_bgr, operator_eye=operator_eye)
 
+        # Workflow Consistency Verification
+        from database import check_workflow_image_consistency
+        wf_warns = check_workflow_image_consistency(
+            image_hash=val_result.image_hash,
+            dhash=getattr(val_result, "dhash", ""),
+            patient_id=patient_id,
+            session_id=session_id,
+            eye=operator_eye,
+        )
+        if wf_warns:
+            val_result.warnings.extend(wf_warns)
+
         # ── MODULE 1: Image Quality Assessment ──
         from engine.pipeline.iqa import run_iqa
         iqa_result, processed_img = run_iqa(img_bgr)
@@ -1475,30 +1566,24 @@ def analyze_v2():
         model_input = processed_data["model_input"]
         original_display = processed_data["original"]
 
+        # ── MODULE 4: Explainability (Auxiliary Failure Isolation) ──
+        processed_data = preprocess_for_display(filepath)
+        model_input = processed_data["model_input"]
+        original_display = processed_data["original"]
+
         heatmap_path = os.path.join(RESULTS_DIR, f"{analysis_id}_heatmap.png")
-        heatmap_overlay, heatmap_raw = generate_gradcam(model_input, original_display, save_path=heatmap_path)
-        heatmap_analysis = get_heatmap_analysis(heatmap_raw)
-
-        # ── MODULE 5: Report Generation ──
-        report, _raw_source = generate_report(
-            detection_result, heatmap_analysis,
-            {"vessel_density_percent": round(structures.vessel_density * 100, 2),
-             "vessel_health_text": f"Vessel density: {structures.vessel_density * 100:.1f}%"},
-            patient_info,
-            structures=structures_dict,
-        )
-
-        elapsed = round(time.time() - start_time, 2)
-        log.info("Analysis %s (v2) completed in %.2fs — Grade %s, referable=%s",
-                 analysis_id, elapsed, detection_result.get('stage', '?'),
-                 grading_result.get('referable', 'N/A') if grading_result else 'N/A')
-
-        # Image paths for response
-        image_paths = {
-            "original": f"/results/{analysis_id}_scan.png",
-            "heatmap": f"/results/{analysis_id}_heatmap.png",
-            "vessels": f"/results/{analysis_id}_vessels.png",
-        }
+        try:
+            heatmap_overlay, heatmap_raw = generate_gradcam(model_input, original_display, save_path=heatmap_path)
+            heatmap_analysis = get_heatmap_analysis(heatmap_raw)
+        except Exception as cam_err:
+            log.warning("Grad-CAM generation failed (v2 auxiliary): %s", cam_err)
+            heatmap_overlay, heatmap_raw = None, None
+            heatmap_analysis = {
+                "status": "EXPLANATION_UNAVAILABLE",
+                "most_affected_region": "central",
+                "activity_intensity": "low",
+                "explanation_available": False,
+            }
 
         # ── Centralized Safety Arbitration (Safety Before Commit) ──
         verified_operator = (g.current_user.get("actor_id") if hasattr(g, "current_user") and g.current_user else request.form.get("operator_id") or "operator-1")
@@ -1511,14 +1596,51 @@ def analyze_v2():
             operator_id=verified_operator,
         )
 
+        # ── MODULE 5: Report Generation (Authoritative Safety Reflection) ──
+        try:
+            report, _raw_source = generate_report(
+                detection_result, heatmap_analysis,
+                {"vessel_density_percent": round(structures.vessel_density * 100, 2),
+                 "vessel_health_text": f"Vessel density: {structures.vessel_density * 100:.1f}%"},
+                patient_info,
+                structures=structures_dict,
+                safety_state=safety_eval.safety_state,
+                safety_eval=safety_eval.to_dict(),
+            )
+        except Exception as rep_err:
+            log.warning("Report generation failed (v2 auxiliary): %s", rep_err)
+            report = {
+                "status": "REPORT_UNAVAILABLE",
+                "plain_language": "Diagnostic narrative report generation unavailable.",
+                "urgency": "HUMAN_REVIEW_REQUIRED",
+            }
+            _raw_source = "auxiliary_report_failure"
+
+        elapsed = round(time.time() - start_time, 2)
+        log.info("Analysis %s (v2) completed in %.2fs — Grade %s, referable=%s",
+                 analysis_id, elapsed, detection_result.get('stage', '?'),
+                 grading_result.get('referable', 'N/A') if grading_result else 'N/A')
+
+        # Image paths for response
+        image_paths = {
+            "original": f"/results/{analysis_id}_scan.png",
+            "heatmap": f"/results/{analysis_id}_heatmap.png" if heatmap_overlay is not None else "",
+            "vessels": f"/results/{analysis_id}_vessels.png" if structures.vessel_mask is not None else "",
+        }
+
         # Update session state if session_id is active
         if session_id:
             try:
-                target_state = (
-                    ScreeningState.SCREENING_COMPLETED
-                    if safety_eval.safety_state == "VERIFIED"
-                    else ScreeningState.SCREENING_UNCERTAIN
-                )
+                if safety_eval.safety_state == "ANATOMY_FAILED":
+                    target_state = ScreeningState.ANATOMY_FAILED
+                elif safety_eval.safety_state == "QUALITY_FAILED":
+                    target_state = ScreeningState.QUALITY_FAILED
+                elif safety_eval.safety_state == "MODEL_FAILURE":
+                    target_state = ScreeningState.MODEL_FAILURE
+                elif safety_eval.safety_state == "VERIFIED":
+                    target_state = ScreeningState.SCREENING_COMPLETED
+                else:
+                    target_state = ScreeningState.SCREENING_UNCERTAIN
                 update_screening_session_state(
                     session_id=session_id,
                     new_state=target_state,
@@ -1530,7 +1652,8 @@ def analyze_v2():
                 log.warning("Could not update session state for %s: %s", session_id, se_err)
 
         # Save to database if patient_id provided and screening is not rejected
-        if patient_id and safety_eval.safety_state != "REJECTED":
+        persistence_status = "SKIPPED_UNSAFE"
+        if patient_id and safety_eval.safety_state not in ("REJECTED", "ANATOMY_FAILED"):
             try:
                 save_scan(
                     scan_id=analysis_id,
@@ -1541,15 +1664,17 @@ def analyze_v2():
                     report=report,
                     image_paths=image_paths,
                     processing_time=elapsed,
-                    laterality=getattr(anatomy_res, "detected_laterality", "OD"),
+                    laterality=getattr(anatomy_res, "inferred_laterality", "OD") if anatomy_res and anatomy_res.inferred_laterality != "UNKNOWN" else (operator_eye or "OD"),
                     operator_id=verified_operator,
                     safety_state=safety_eval.safety_state,
                     automation_level=safety_eval.automation_level,
                     reason_codes=safety_eval.reason_codes,
-                    image_hash=getattr(val_result, "sha256", ""),
+                    image_hash=val_result.image_hash,
                 )
+                persistence_status = "SAVED"
                 log.info("Scan %s saved for patient %s (v2, Safety: %s)", analysis_id, patient_id, safety_eval.safety_state)
             except Exception as db_err:
+                persistence_status = "FAILED"
                 log.warning("Failed to save scan to DB: %s", db_err)
 
         # ── Compile v2 response ──
@@ -1560,6 +1685,7 @@ def analyze_v2():
             "patient_id": patient_id,
             "processing_time": elapsed,
             "status": "OK",
+            "persistence_status": persistence_status,
 
             # Central Safety Arbitration
             "safety": safety_eval.to_dict(),
@@ -1711,6 +1837,18 @@ def analyze_v3():
         operator_eye = request.form.get("eye")
         anatomy_res = assess_anatomy_and_laterality(raw_bgr, operator_eye=operator_eye)
 
+        # Workflow Consistency Verification
+        from database import check_workflow_image_consistency
+        wf_warns = check_workflow_image_consistency(
+            image_hash=val_result.image_hash,
+            dhash=getattr(val_result, "dhash", ""),
+            patient_id=patient_id,
+            session_id=session_id,
+            eye=operator_eye,
+        )
+        if wf_warns:
+            val_result.warnings.extend(wf_warns)
+
         from engine.pipeline.two_tier_runner import run_two_tier_pipeline
 
         result = run_two_tier_pipeline(
@@ -1743,11 +1881,16 @@ def analyze_v3():
         # Update session state if session_id is active
         if session_id:
             try:
-                target_state = (
-                    ScreeningState.SCREENING_COMPLETED
-                    if safety_eval.safety_state == "VERIFIED"
-                    else ScreeningState.SCREENING_UNCERTAIN
-                )
+                if safety_eval.safety_state == "ANATOMY_FAILED":
+                    target_state = ScreeningState.ANATOMY_FAILED
+                elif safety_eval.safety_state == "QUALITY_FAILED":
+                    target_state = ScreeningState.QUALITY_FAILED
+                elif safety_eval.safety_state == "MODEL_FAILURE":
+                    target_state = ScreeningState.MODEL_FAILURE
+                elif safety_eval.safety_state == "VERIFIED":
+                    target_state = ScreeningState.SCREENING_COMPLETED
+                else:
+                    target_state = ScreeningState.SCREENING_UNCERTAIN
                 update_screening_session_state(
                     session_id=session_id,
                     new_state=target_state,
@@ -1759,7 +1902,8 @@ def analyze_v3():
                 log.warning("Could not update session state for %s: %s", session_id, se_err)
 
         # Save to DB if patient_id provided and safety is not rejected
-        if patient_id and result.get("status") != "REJECTED" and safety_eval.safety_state != "REJECTED":
+        persistence_status = "SKIPPED_UNSAFE"
+        if patient_id and result.get("status") != "REJECTED" and safety_eval.safety_state not in ("REJECTED", "ANATOMY_FAILED"):
             try:
                 save_scan(
                     scan_id=analysis_id,
@@ -1770,17 +1914,20 @@ def analyze_v3():
                     report=result.get("report") or {},
                     image_paths=result.get("images") or {},
                     processing_time=round(result.get("total_latency_ms", 0) / 1000.0, 2),
-                    laterality=getattr(anatomy_res, "detected_laterality", "OD"),
+                    laterality=getattr(anatomy_res, "inferred_laterality", "OD") if anatomy_res and anatomy_res.inferred_laterality != "UNKNOWN" else (operator_eye or "OD"),
                     operator_id=verified_operator,
                     safety_state=safety_eval.safety_state,
                     automation_level=safety_eval.automation_level,
                     reason_codes=safety_eval.reason_codes,
-                    image_hash=getattr(val_result, "sha256", ""),
+                    image_hash=val_result.image_hash,
                 )
+                persistence_status = "SAVED"
                 log.info("Scan %s saved for patient %s (v3, Safety: %s)", analysis_id, patient_id, safety_eval.safety_state)
             except Exception as db_err:
+                persistence_status = "FAILED"
                 log.warning("Failed to save v3 scan to DB: %s", db_err)
 
+        result["persistence_status"] = persistence_status
         return jsonify(result)
 
     except Exception as e:

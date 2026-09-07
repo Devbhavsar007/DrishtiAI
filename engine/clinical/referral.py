@@ -14,6 +14,37 @@ def decide_referral(
 
     Policy intentionally separates ML outputs from decision governance.
     """
+    safety_state = str(screening.get("safety_state") or "").upper()
+    valid_anatomy = screening.get("valid_anatomy")
+    eligibility = str(screening.get("screening_eligibility") or "").upper()
+
+    # Safety Invariant: Failure states must NEVER be treated as normal low-stage screening
+    if (
+        safety_state in ("REJECTED", "ANATOMY_FAILED", "QUALITY_FAILED", "BLOCKED", "MODEL_FAILURE")
+        or valid_anatomy is False
+        or eligibility == "INELIGIBLE"
+    ):
+        fail_codes = ["AUTOMATED_SCREENING_INELIGIBLE"]
+        if safety_state == "ANATOMY_FAILED" or valid_anatomy is False:
+            fail_codes.append("ANATOMY_FAILED_RETAKE_REQUIRED")
+        elif safety_state == "QUALITY_FAILED":
+            fail_codes.append("QUALITY_FAILED_RETAKE_REQUIRED")
+        elif safety_state == "MODEL_FAILURE":
+            fail_codes.append("MODEL_FAILURE_REQUIRES_MANUAL_GRADING")
+        else:
+            fail_codes.append("SAFETY_REJECTION_RETAKE_REQUIRED")
+        return {
+            "priority": "RETAKE_OR_SPECIALIST_EVALUATION",
+            "reasonCodes": sorted(fail_codes),
+            "reason_codes": sorted(fail_codes),
+            "humanReviewRequired": True,
+            "human_review_required": True,
+            "disclaimer": (
+                "Automated screening could not be completed safely. "
+                "Retake image or refer for in-person comprehensive ophthalmology examination."
+            ),
+        }
+
     stage = int(screening.get("stage") or 0)
     confidence = float(screening.get("confidence") or 0.0)
 

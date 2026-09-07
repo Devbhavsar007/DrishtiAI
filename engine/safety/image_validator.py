@@ -38,6 +38,8 @@ class ImageValidationResult:
     valid: bool
     error: Optional[str] = None
     image_hash: str = ""
+    dhash: str = ""
+    exif_orientation: int = 1
     width: int = 0
     height: int = 0
     channels: int = 3
@@ -65,6 +67,8 @@ class ImageValidationResult:
             "valid": self.valid,
             "error": self.error,
             "image_hash": self.image_hash,
+            "dhash": self.dhash,
+            "exif_orientation": self.exif_orientation,
             "dimensions": {"width": self.width, "height": self.height, "channels": self.channels},
             "is_blank": self.is_blank,
             "possible_screen_capture": self.possible_screen_capture,
@@ -118,6 +122,27 @@ def _detect_screen_moire(gray_img: np.ndarray) -> Tuple[bool, float]:
         return False, 0.0
 
 
+def compute_dhash(img_bgr: np.ndarray, hash_size: int = 8) -> str:
+    """
+    Compute difference hash (dHash) for perceptual similarity and duplicate detection
+    resistant to minor resizing and re-encoding.
+    """
+    if img_bgr is None or img_bgr.size == 0:
+        return ""
+    try:
+        gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY) if len(img_bgr.shape) > 2 else img_bgr
+        resized = cv2.resize(gray, (hash_size + 1, hash_size), interpolation=cv2.INTER_AREA)
+        diff = resized[:, 1:] > resized[:, :-1]
+        decimal_val = 0
+        hex_len = (hash_size * hash_size) // 4
+        for idx, bit in enumerate(diff.flatten()):
+            if bit:
+                decimal_val |= 1 << idx
+        return f"{decimal_val:0{hex_len}x}"
+    except Exception:
+        return ""
+
+
 def validate_image_file(
     file_bytes_or_path,
     existing_hashes: Optional[set] = None
@@ -163,7 +188,8 @@ def validate_image_file(
     if existing_hashes and img_hash in existing_hashes:
         warnings.append("DUPLICATE_IMAGE_SUBMISSION: Image hash matches a previously analyzed scan.")
 
-    # 4. Decompression bomb check & PIL verification
+    # 4. Decompression bomb check, EXIF inspection & PIL verification
+    exif_orientation = 1
     try:
         bio = io.BytesIO(raw_bytes)
         with Image.open(bio) as pil_img:
@@ -175,6 +201,16 @@ def validate_image_file(
                     rejection_reason="DIMENSIONS_EXCEED_LIMIT",
                 ), None
             pil_img.verify()
+
+        try:
+            with Image.open(io.BytesIO(raw_bytes)) as pil_img_meta:
+                exif = pil_img_meta.getexif()
+                if exif:
+                    exif_orientation = int(exif.get(274, 1))
+                    if exif_orientation not in (0, 1):
+                        warnings.append(f"EXIF_ORIENTATION_NON_STANDARD: Image metadata specifies orientation tag {exif_orientation}.")
+        except Exception:
+            pass
     except Image.DecompressionBombError:
         return ImageValidationResult(valid=False, error="Decompression bomb detected. Upload rejected.", rejection_reason="DECOMPRESSION_BOMB_RISK"), None
     except Exception as e:
@@ -215,9 +251,14 @@ def validate_image_file(
     if is_screen:
         warnings.append("POSSIBLE_SCREEN_CAPTURE: High-frequency periodic pattern detected (possible monitor photograph).")
 
+    # 8. Perceptual dHash
+    dhash_val = compute_dhash(img_bgr)
+
     return ImageValidationResult(
         valid=True,
         image_hash=img_hash,
+        dhash=dhash_val,
+        exif_orientation=exif_orientation,
         width=w,
         height=h,
         channels=channels,

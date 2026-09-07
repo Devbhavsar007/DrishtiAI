@@ -31,12 +31,37 @@ def _confidence_from_scan(scan: dict) -> float:
     return _to_float(detection.get("confidence"), 0.0)
 
 
-def _latest_previous_scan(current_scan_id: str, previous_scans: list[dict] | None) -> dict | None:
+def _latest_previous_scan(
+    current_scan_or_id: str | dict,
+    previous_scans: list[dict] | None,
+    current_eye: str | None = None
+) -> dict | None:
     if not previous_scans:
         return None
+    if isinstance(current_scan_or_id, dict):
+        current_scan_id = str(current_scan_or_id.get("id", ""))
+        if not current_eye:
+            current_eye = current_scan_or_id.get("laterality") or current_scan_or_id.get("eye")
+    else:
+        current_scan_id = str(current_scan_or_id)
+
     for s in previous_scans:
-        if str(s.get("id", "")) != str(current_scan_id):
-            return s
+        if str(s.get("id", "")) == str(current_scan_id):
+            continue
+
+        # Invariant: Never compare progression across opposite eyes (OD vs OS)
+        prev_eye = s.get("laterality") or s.get("eye")
+        if current_eye and prev_eye and str(current_eye).upper() != str(prev_eye).upper():
+            continue
+
+        # Invariant: Never consume previous scans that failed safety or anatomical verification
+        prev_safety = str(s.get("safety_state") or "").upper()
+        if prev_safety in ("REJECTED", "ANATOMY_FAILED", "QUALITY_FAILED", "BLOCKED"):
+            continue
+        if s.get("valid_anatomy") is False:
+            continue
+
+        return s
     return None
 
 
@@ -53,8 +78,38 @@ def assess_progression_risk(
     - This is an evidence-informed rule engine, not a learned longitudinal model.
     - Output intentionally separates observed data, predicted risk, and recommendation.
     """
+    # Guard: Do not calculate progression from unsafe current scan
+    curr_safety = str(current_scan.get("safety_state") or "").upper()
+    if curr_safety in ("REJECTED", "ANATOMY_FAILED", "QUALITY_FAILED") or current_scan.get("valid_anatomy") is False:
+        return {
+            "engine": "deterministic_progression_v1",
+            "longitudinal_state": "LONGITUDINAL_UNAVAILABLE",
+            "progression_availability_message": "Progression prediction unavailable: current scan failed safety or anatomical validation.",
+            "is_individualized_prediction": False,
+            "observed_data": {
+                "current_stage": current_scan.get("stage"),
+                "previous_stage": None,
+                "stage_delta": None,
+                "current_confidence": 0.0,
+            },
+            "predicted_risk": {
+                "risk_category": "UNKNOWN",
+                "six_month_risk": 0.0,
+                "twelve_month_risk": 0.0,
+                "supporting_factors": ["unsafe current study"],
+                "uncertainty_flags": ["current scan ineligible for progression calculation"],
+                "longitudinal_state": "LONGITUDINAL_UNAVAILABLE",
+            },
+            "clinical_recommendation": {
+                "follow_up_priority": "UNKNOWN",
+                "human_review_recommended": True,
+                "note": "Progression suppressed due to invalid current study.",
+            },
+        }
+
     current_stage = _stage_from_scan(current_scan)
     current_conf = _confidence_from_scan(current_scan)
+    current_eye = current_scan.get("laterality") or current_scan.get("eye")
 
     base_risk_map = {
         0: 0.10,
@@ -65,8 +120,9 @@ def assess_progression_risk(
     }
     six_month = base_risk_map.get(current_stage, 0.10)
     supporting_factors: list[str] = []
+    uncertainty_flags: list[str] = []
 
-    prev_scan = _latest_previous_scan(str(current_scan.get("id", "")), previous_scans)
+    prev_scan = _latest_previous_scan(current_scan, previous_scans, current_eye=current_eye)
     prev_stage = _stage_from_scan(prev_scan) if prev_scan else None
     stage_delta = None
     if prev_stage is not None:
@@ -77,9 +133,29 @@ def assess_progression_risk(
         elif stage_delta < 0:
             six_month -= min(0.08 * abs(stage_delta), 0.16)
             supporting_factors.append("improved retinal grade since previous screening")
+            # Biological plausibility check: Severe grade regressing to Stage 0
+            if prev_stage >= 3 and current_stage == 0:
+                uncertainty_flags.append("ANOMALOUS_RAPID_REGRESSION_DETECTED: Stage >=3 to Stage 0 requires clinician verification")
         elif current_stage >= 2:
             six_month += 0.05
             supporting_factors.append("persistent referable abnormal screening")
+
+        # Scan interval check if timestamps are present
+        try:
+            from datetime import datetime
+            c_time_str = current_scan.get("created_at")
+            p_time_str = prev_scan.get("created_at")
+            if c_time_str and p_time_str:
+                c_dt = datetime.fromisoformat(c_time_str.replace("Z", "+00:00"))
+                p_dt = datetime.fromisoformat(p_time_str.replace("Z", "+00:00"))
+                delta = c_dt - p_dt
+                days = abs(delta.days if hasattr(delta, "days") else int(delta.total_seconds() / 86400))
+                if days < 7:
+                    uncertainty_flags.append("ACUTE_REPEAT_SCAN_SUPPRESSED: scan interval < 7 days; acute duplicate capture suspected")
+                elif days > 36 * 30:
+                    uncertainty_flags.append("EXTENDED_GAP_REDUCED_FIDELITY: long scan interval (> 36 months); historical baseline has reduced predictive fidelity")
+        except Exception:
+            pass
 
     if patient_profile:
         raw_hba1c = patient_profile.get("hba1c")
@@ -120,7 +196,6 @@ def assess_progression_risk(
             except (TypeError, ValueError):
                 pass
 
-    uncertainty_flags: list[str] = []
     if prev_stage is None:
         longitudinal_state = "LIMITED_LONGITUDINAL_HISTORY"
         uncertainty_flags.append("limited longitudinal history")
@@ -128,6 +203,9 @@ def assess_progression_risk(
     elif current_scan.get("stage") is None and current_scan.get("detection") is None:
         longitudinal_state = "LONGITUDINAL_UNAVAILABLE"
         progression_msg = "Progression prediction unavailable: current scan data incomplete."
+    elif any("scan interval < 7 days" in f for f in uncertainty_flags):
+        longitudinal_state = "LIMITED_LONGITUDINAL_HISTORY"
+        progression_msg = "Progression analysis suppressed: scan interval < 7 days."
     else:
         longitudinal_state = "LONGITUDINAL_SUPPORTED"
         progression_msg = None
