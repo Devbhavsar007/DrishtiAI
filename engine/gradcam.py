@@ -7,6 +7,8 @@ import numpy as np
 import cv2
 from config import IMG_SIZE, DISPLAY_SIZE
 
+_last_gradcam_simulated = False
+
 
 def generate_gradcam(preprocessed_image, original_image, save_path=None):
     """
@@ -103,6 +105,8 @@ def generate_gradcam(preprocessed_image, original_image, save_path=None):
         if save_path:
             cv2.imwrite(save_path, heatmap_overlay)
 
+        global _last_gradcam_simulated
+        _last_gradcam_simulated = False
         return heatmap_overlay, heatmap_raw
 
     except Exception as e:
@@ -128,6 +132,9 @@ def _generate_simulated_heatmap(original_image, save_path=None):
     when the real model Grad-CAM doesn't work.
     Centers activation around the macula (center of retina).
     """
+    global _last_gradcam_simulated
+    _last_gradcam_simulated = True
+
     h, w = original_image.shape[:2]
 
     y_center, x_center = int(h * 0.48), int(w * 0.55)
@@ -151,11 +158,24 @@ def _generate_simulated_heatmap(original_image, save_path=None):
     return overlay, heatmap_raw
 
 
-def get_heatmap_analysis(heatmap_raw):
+def get_heatmap_analysis(heatmap_raw, is_simulated=None):
     """
     Analyze the heatmap to determine which regions have highest activation.
     This text gets sent to Gemma-4 for report generation.
     """
+    global _last_gradcam_simulated
+    simulated = is_simulated if is_simulated is not None else _last_gradcam_simulated
+
+    if heatmap_raw is None:
+        return {
+            "explanation_status": "EXPLANATION_UNAVAILABLE",
+            "explanation_available": False,
+            "is_simulated": False,
+            "most_affected_region": "None (explanation unavailable)",
+            "activity_intensity": "none",
+            "region_scores": {},
+        }
+
     h, w = heatmap_raw.shape
 
     regions = {
@@ -184,7 +204,13 @@ def get_heatmap_analysis(heatmap_raw):
         "temporal": "temporal retinal region",
     }
 
+    status = "EXPLANATION_UNAVAILABLE" if simulated else "EXPLANATION_AVAILABLE"
+    available = not simulated
+
     return {
+        "explanation_status": status,
+        "explanation_available": available,
+        "is_simulated": bool(simulated),
         "most_affected_region": region_names[most_affected],
         "activity_intensity": intensity,
         "region_scores": {region_names.get(k, k): round(float(v), 3) for k, v in regions.items()},

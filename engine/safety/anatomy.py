@@ -32,6 +32,26 @@ class AnatomyResult:
     human_confirmation_required: bool = False
     notes: List[str] = field(default_factory=list)
 
+    @property
+    def laterality_status(self) -> str:
+        """Explicit state: VERIFIED | CONFLICT | UNKNOWN"""
+        if self.inferred_laterality == "UNKNOWN" or not self.operator_selected_eye:
+            return "UNKNOWN"
+        if self.laterality_mismatch:
+            return "CONFLICT"
+        if self.operator_selected_eye == self.inferred_laterality:
+            return "VERIFIED"
+        return "UNKNOWN"
+
+    @property
+    def resolution_method(self) -> str:
+        """Resolution pathway: AUTOMATIC_VERIFIED | OPERATOR_CONFIRMATION_REQUIRED | EXPLICIT_RESOLUTION_REQUIRED"""
+        if self.laterality_status == "VERIFIED":
+            return "AUTOMATIC_VERIFIED"
+        elif self.laterality_status == "CONFLICT":
+            return "OPERATOR_CONFIRMATION_REQUIRED"
+        return "EXPLICIT_RESOLUTION_REQUIRED"
+
     def to_dict(self) -> Dict:
         return {
             "valid_anatomy": self.valid_anatomy,
@@ -42,6 +62,8 @@ class AnatomyResult:
             "operator_selected_eye": self.operator_selected_eye,
             "laterality_confidence": round(self.laterality_confidence, 3),
             "laterality_mismatch": self.laterality_mismatch,
+            "laterality_status": self.laterality_status,
+            "resolution_method": self.resolution_method,
             "human_confirmation_required": self.human_confirmation_required,
             "notes": self.notes,
         }

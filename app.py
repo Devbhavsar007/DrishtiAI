@@ -176,6 +176,15 @@ def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
+def _safe_remove_file(filepath: str):
+    """Safely remove temporary uploaded files, preventing orphan accumulation on disk."""
+    if filepath and os.path.isfile(filepath):
+        try:
+            os.remove(filepath)
+        except Exception as e:
+            log.warning("Could not remove temporary upload %s: %s", filepath, e)
+
+
 # ========================================
 # HEALTH CHECK
 # ========================================
@@ -958,6 +967,16 @@ def api_sync_status():
 def api_sync_pending():
     """Retrieve pending sync events for local device synchronization."""
     device_id = request.args.get("device_id")
+    # Device authorization check: non-admin callers can only retrieve events for their own bound device
+    if hasattr(g, "current_user") and g.current_user:
+        caller_role = g.current_user.get("actor_role")
+        caller_device = g.current_user.get("device_id")
+        if caller_role != Role.ADMIN.value and device_id and caller_device and device_id != caller_device:
+            return jsonify({
+                "success": False,
+                "error": f"Access denied: caller device '{caller_device}' cannot access pending queue for device '{device_id}'."
+            }), 403
+
     limit = int(request.args.get("limit", 100))
     events = get_pending_sync_events(device_id=device_id, limit=limit)
     return jsonify({
@@ -1040,6 +1059,28 @@ def analyze():
     if request.form.get("hba1c"):
         patient_info["hba1c"] = request.form.get("hba1c")
 
+    session_id = request.form.get("session_id")
+    if session_id:
+        sess = get_screening_session(session_id)
+        if not sess:
+            _safe_remove_file(filepath)
+            return jsonify({"error": f"Screening session '{session_id}' not found.", "safety_state": "REJECTED"}), 404
+        if sess.get("patient_id") and patient_id and sess["patient_id"] != patient_id:
+            _safe_remove_file(filepath)
+            return jsonify({
+                "error": f"Session binding conflict: session '{session_id}' is bound to patient '{sess['patient_id']}', but request specified patient '{patient_id}'.",
+                "safety_state": "REJECTED"
+            }), 409
+        operator_eye = request.form.get("eye")
+        if sess.get("eye") and operator_eye and sess["eye"] != operator_eye:
+            _safe_remove_file(filepath)
+            return jsonify({
+                "error": f"Session binding conflict: session '{session_id}' is bound to eye '{sess['eye']}', but request specified eye '{operator_eye}'.",
+                "safety_state": "REJECTED"
+            }), 409
+        if not patient_id:
+            patient_id = sess.get("patient_id", "")
+
     try:
         raw_bgr = cv2.imread(filepath)
         if raw_bgr is None:
@@ -1091,6 +1132,24 @@ def analyze():
             patient_id=patient_id,
             operator_id=verified_operator,
         )
+
+        # Update session state if session_id is active
+        if session_id:
+            try:
+                target_state = (
+                    ScreeningState.SCREENING_COMPLETED
+                    if safety_eval.safety_state == "VERIFIED"
+                    else ScreeningState.SCREENING_UNCERTAIN
+                )
+                update_screening_session_state(
+                    session_id=session_id,
+                    new_state=target_state,
+                    actor_id=verified_operator,
+                    reason=f"Inference complete (safety: {safety_eval.safety_state})",
+                    validate_transition=False,
+                )
+            except Exception as se_err:
+                log.warning("Could not update session state for %s: %s", session_id, se_err)
 
         # --- 5. Generate Heatmap ---
         heatmap_path = os.path.join(RESULTS_DIR, f"{analysis_id}_heatmap.png")
@@ -1166,6 +1225,8 @@ def analyze():
             import traceback
             error_response["traceback"] = traceback.format_exc()
         return jsonify(error_response), 500
+    finally:
+        _safe_remove_file(filepath)
 
 
 @app.route("/translate", methods=["POST"])
@@ -1250,6 +1311,28 @@ def analyze_v2():
         val = request.form.get(field_name)
         if val:
             patient_info[field_name] = val
+
+    session_id = request.form.get("session_id")
+    if session_id:
+        sess = get_screening_session(session_id)
+        if not sess:
+            _safe_remove_file(filepath)
+            return jsonify({"error": f"Screening session '{session_id}' not found.", "safety_state": "REJECTED"}), 404
+        if sess.get("patient_id") and patient_id and sess["patient_id"] != patient_id:
+            _safe_remove_file(filepath)
+            return jsonify({
+                "error": f"Session binding conflict: session '{session_id}' is bound to patient '{sess['patient_id']}', but request specified patient '{patient_id}'.",
+                "safety_state": "REJECTED"
+            }), 409
+        operator_eye = request.form.get("eye")
+        if sess.get("eye") and operator_eye and sess["eye"] != operator_eye:
+            _safe_remove_file(filepath)
+            return jsonify({
+                "error": f"Session binding conflict: session '{session_id}' is bound to eye '{sess['eye']}', but request specified eye '{operator_eye}'.",
+                "safety_state": "REJECTED"
+            }), 409
+        if not patient_id:
+            patient_id = sess.get("patient_id", "")
 
     try:
         img_bgr = cv2.imread(filepath)
@@ -1428,6 +1511,24 @@ def analyze_v2():
             operator_id=verified_operator,
         )
 
+        # Update session state if session_id is active
+        if session_id:
+            try:
+                target_state = (
+                    ScreeningState.SCREENING_COMPLETED
+                    if safety_eval.safety_state == "VERIFIED"
+                    else ScreeningState.SCREENING_UNCERTAIN
+                )
+                update_screening_session_state(
+                    session_id=session_id,
+                    new_state=target_state,
+                    actor_id=verified_operator,
+                    reason=f"Inference complete v2 (safety: {safety_eval.safety_state})",
+                    validate_transition=False,
+                )
+            except Exception as se_err:
+                log.warning("Could not update session state for %s: %s", session_id, se_err)
+
         # Save to database if patient_id provided and screening is not rejected
         if patient_id and safety_eval.safety_state != "REJECTED":
             try:
@@ -1496,6 +1597,8 @@ def analyze_v2():
             import traceback
             error_response["traceback"] = traceback.format_exc()
         return jsonify(error_response), 500
+    finally:
+        _safe_remove_file(filepath)
 
 
 # ========================================
@@ -1553,6 +1656,28 @@ def analyze_v3():
         val = request.form.get(field_name)
         if val:
             patient_info[field_name] = val
+
+    session_id = request.form.get("session_id")
+    if session_id:
+        sess = get_screening_session(session_id)
+        if not sess:
+            _safe_remove_file(filepath)
+            return jsonify({"error": f"Screening session '{session_id}' not found.", "safety_state": "REJECTED"}), 404
+        if sess.get("patient_id") and patient_id and sess["patient_id"] != patient_id:
+            _safe_remove_file(filepath)
+            return jsonify({
+                "error": f"Session binding conflict: session '{session_id}' is bound to patient '{sess['patient_id']}', but request specified patient '{patient_id}'.",
+                "safety_state": "REJECTED"
+            }), 409
+        operator_eye = request.form.get("eye")
+        if sess.get("eye") and operator_eye and sess["eye"] != operator_eye:
+            _safe_remove_file(filepath)
+            return jsonify({
+                "error": f"Session binding conflict: session '{session_id}' is bound to eye '{sess['eye']}', but request specified eye '{operator_eye}'.",
+                "safety_state": "REJECTED"
+            }), 409
+        if not patient_id:
+            patient_id = sess.get("patient_id", "")
 
     force_offline = (
         request.form.get("offline", "").lower() in ("true", "1", "yes")
@@ -1615,6 +1740,24 @@ def analyze_v3():
         result["clinical_action_allowed"] = safety_eval.clinical_action_allowed
         result["screening_eligibility"] = safety_eval.screening_eligibility
 
+        # Update session state if session_id is active
+        if session_id:
+            try:
+                target_state = (
+                    ScreeningState.SCREENING_COMPLETED
+                    if safety_eval.safety_state == "VERIFIED"
+                    else ScreeningState.SCREENING_UNCERTAIN
+                )
+                update_screening_session_state(
+                    session_id=session_id,
+                    new_state=target_state,
+                    actor_id=verified_operator,
+                    reason=f"Inference complete v3 (safety: {safety_eval.safety_state})",
+                    validate_transition=False,
+                )
+            except Exception as se_err:
+                log.warning("Could not update session state for %s: %s", session_id, se_err)
+
         # Save to DB if patient_id provided and safety is not rejected
         if patient_id and result.get("status") != "REJECTED" and safety_eval.safety_state != "REJECTED":
             try:
@@ -1647,6 +1790,8 @@ def analyze_v3():
             import traceback
             error_response["traceback"] = traceback.format_exc()
         return jsonify(error_response), 500
+    finally:
+        _safe_remove_file(filepath)
 
 
 # ========================================

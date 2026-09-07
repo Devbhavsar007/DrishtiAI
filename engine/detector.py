@@ -277,6 +277,11 @@ def _predict_tensorflow(image, model):
         "severity": stage_info["severity"],
         "color": stage_info["color"],
         "_model": "CNN (Tanwar-12)",
+        "primary_failure": True,
+        "fallback_used": True,
+        "fallback_reason": "Primary EfficientNet-B3 unavailable; executed secondary TensorFlow CNN fallback.",
+        "fallback_model_version": "Tanwar-12-v1.0",
+        "calibration_version": "UNCHECKED_FALLBACK",
     }
 
 
@@ -319,6 +324,11 @@ def _mock_prediction():
         "_model": "Deterministic Baseline (Offline)",
         "_deterministic_fallback": True,
         "model_available": False,
+        "primary_failure": True,
+        "fallback_used": True,
+        "fallback_reason": "Neural model weights unavailable; deterministic safe baseline returned.",
+        "fallback_model_version": "Safe-Baseline-v1.0",
+        "calibration_version": "CONSERVATIVE_HEURISTIC",
         "status": "UNABLE_TO_CLASSIFY",
     }
 

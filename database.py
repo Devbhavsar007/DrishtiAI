@@ -369,6 +369,7 @@ def update_screening_session_state(
     actor_id: str = "operator-1",
     reason: str = "",
     validate_transition: bool = True,
+    actor_role: str | None = None,
 ):
     """Update state of an existing screening session with lifecycle enforcement."""
     with get_db() as conn:
@@ -378,10 +379,13 @@ def update_screening_session_state(
             if current_state and current_state != new_state:
                 from engine.safety.state_machine import ALLOWED_TRANSITIONS, InvalidStateTransitionError
                 allowed = ALLOWED_TRANSITIONS.get(current_state, set())
-                # Clinically allow doctor sign-off/finalize/cancel from active states
+                # Clinically allow doctor/admin sign-off/finalize/cancel from active states
                 is_doctor_override = (
                     new_state in ("FINALIZED", "CANCELLED") and
-                    (actor_id.startswith("dr-") or "doctor" in actor_id.lower() or "doc" in actor_id.lower())
+                    (
+                        (actor_role and actor_role.upper() in ("DOCTOR", "ADMIN")) or
+                        actor_id.startswith("dr-") or "doctor" in actor_id.lower() or "doc" in actor_id.lower()
+                    )
                 )
                 if new_state not in allowed and not is_doctor_override:
                     raise InvalidStateTransitionError(

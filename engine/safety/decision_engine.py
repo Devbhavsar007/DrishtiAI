@@ -211,9 +211,13 @@ class SafetyDecisionEngine:
             primary_stage = primary_detection.get("stage")
 
             # Check if deterministic fallback / mock is active
-            if primary_detection.get("_deterministic_fallback") or primary_detection.get("model_available") is False:
+            if (
+                primary_detection.get("_deterministic_fallback")
+                or primary_detection.get("model_available") is False
+                or primary_detection.get("fallback_used") is True
+            ):
                 reason_codes.append("MODEL_FALLBACK_ACTIVE")
-                instructions.append("Model weights unavailable: deterministic synthetic baseline active. Cannot be cleared without physician grading.")
+                instructions.append("Model fallback active: secondary or heuristic model in use. Requires physician review and sign-off.")
 
             if primary_conf < self.thresholds["min_confidence"]:
                 reason_codes.append("LOW_CONFIDENCE")
