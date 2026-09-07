@@ -17,18 +17,21 @@ def _to_float(value: Any, default: float = 0.0) -> float:
 
 def evaluate_safety(
     *,
-    quality_assessment: dict[str, Any] | None,
-    primary_prediction: dict[str, Any] | None,
+    quality_assessment: dict[str, Any] | None = None,
+    primary_prediction: dict[str, Any] | None = None,
     secondary_prediction: dict[str, Any] | None = None,
+    anatomy_assessment: dict[str, Any] | Any | None = None,
+    **kwargs: Any,
 ) -> SafetyDecision:
     """
-    Evaluate image quality, prediction confidence, and inter-model agreement
+    Evaluate image quality, prediction confidence, anatomy landmarks, and inter-model agreement
     by delegating directly to the unified authoritative SafetyDecisionEngine.
     Guarantees consistent safety arbitration across all API endpoints and pipelines.
     """
     qa = quality_assessment or {}
     pred = primary_prediction or {}
     sec = secondary_prediction or {}
+    anat = anatomy_assessment or kwargs.get("anatomy_res") or kwargs.get("anatomy")
 
     q_dec = str(qa.get("decision", "ACCEPT")).upper()
     q_score = _to_float(qa.get("quality_score"), 0.85)
@@ -42,6 +45,7 @@ def evaluate_safety(
     engine = SafetyDecisionEngine()
     result: SafetyEvaluationResult = engine.evaluate(
         image_val=image_val,
+        anatomy_res=anat,
         primary_detection=pred,
         secondary_detection=sec,
         quality_assessment=qa,

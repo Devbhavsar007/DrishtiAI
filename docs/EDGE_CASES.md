@@ -115,3 +115,26 @@ The following table details every critical numerical threshold introduced or har
 | **Max Longitudinal Interval** | $> 36$ months | Scans separated by $> 3$ years without intervening records exhibit significantly degraded predictive fidelity due to unobserved glycemic events. | Interval $> 36$ months $\to$ `EXTENDED_GAP_REDUCED_FIDELITY`. | **CLINICAL HEURISTIC** |
 | **Max Stage Regression** | Stage $4 \to 0$ | Proliferative diabetic retinopathy cannot spontaneously regress to completely normal fundus without intensive intervention (pan-retinal photocoagulation or vitrectomy). Spontaneous $4 \to 0$ indicates potential patient identity confusion. | Stage $4 \to 0$ jump $\to$ `ANOMALOUS_RAPID_REGRESSION_DETECTED`. | **SAFETY FLAG** |
 
+---
+
+## 6. Closure of Remaining Operational Gaps (P1/P2 Audit)
+
+The following 5 gaps were systematically audited and closed with defense-in-depth enforcement:
+
+1. **Anatomy Failure Propagation in Decision Engine & Clinical Safety**:
+   - `SafetyDecisionEngine.evaluate()` explicitly checks `if anatomy_res:` and handles both `AnatomyResult` objects and dict payloads. If `valid_anatomy is False`, Gate 2b immediately transitions to `ANATOMY_FAILED` with `screening_eligibility="INELIGIBLE"`, `clinical_action_allowed=False`.
+   - `evaluate_safety` in `engine/clinical/safety.py` now accepts `anatomy_assessment` and delegates directly to `SafetyDecisionEngine`, ensuring anatomy failure is propagated uniformly across all endpoints.
+2. **Explicit Rotation / Mirroring Policy**:
+   - **Policy**: Under any detected rotation ($90^\circ, 180^\circ, 270^\circ$), mirroring (horizontal/vertical flip), or non-standard EXIF orientation tag ($\ne 1$), DrishtiAI **never silently auto-normalizes or guesses**.
+   - Spatial laterality inference is suppressed (`inferred_laterality="UNKNOWN"`, `laterality_confidence=0.0`).
+   - `human_confirmation_required=True` is enforced with explicit warning codes (`ORIENTATION_ANOMALY_SUSPECTED`, `ORIENTATION_EXIF_NON_STANDARD`).
+3. **Downstream Artifact Pipeline Gating & Explainability Transparency**:
+   - On hard safety failures (`REJECTED`, `ANATOMY_FAILED`, `QUALITY_FAILED`, `MODEL_FAILURE`, `BLOCKED`), expensive Grad-CAM and ONNX vessel segmentation are skipped, setting `explanation_available=False` and `vessel_available=False` (`status="EXPLANATION_UNAVAILABLE_DUE_TO_SAFETY_FAILURE"`).
+   - On unverified/uncertain scans (`UNCERTAIN`, `LATERALITY_CONFLICT`, `OOD_REVIEW`), explainability artifacts are generated for human review but strictly tagged with `"for_clinical_review_only": True`, `"screening_uncertain": True`.
+4. **Exhaustive Downstream AI Component Failure-Injection Suite**:
+   - Added `TestDownstreamAIFailureInjection` in `tests/test_failure_injection.py` covering: Grad-CAM runtime exceptions, vessel segmentation failures, Gemma LLM timeout exceptions, model NaN/Inf outputs, malformed stage indices, and progression rejection of invalid studies (all 24/24 tests passing).
+5. **Strict Safety-State Gating on Longitudinal Progression**:
+   - `/api/scans/<scan_id>/progression` endpoint verifies `safety_state` of the requested scan before computation: `ANATOMY_FAILED`, `QUALITY_FAILED`, `OOD_REVIEW`, `MODEL_FAILURE`, `LATERALITY_CONFLICT`, `REJECTED`, and `BLOCKED` return HTTP 400 (`progression_eligible=False`).
+   - `assess_progression_risk` in `engine/clinical/progression.py` excludes invalid historical studies from progression history and passes complete context (`laterality`, `created_at`, `safety_state`).
+
+

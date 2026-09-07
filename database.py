@@ -656,6 +656,8 @@ def save_scan(scan_id, patient_id, detection_result, heatmap_analysis,
               automation_level='AUTOMATED_ASSISTANCE', reason_codes=None,
               image_hash='', device_id='LOCAL-EDGE-01', screening_state='FINALIZED'):
     """Save a completed scan to the database idempotently with safety invariants."""
+    if isinstance(patient_id, dict):
+        patient_id = patient_id.get("id") or patient_id.get("patient_id")
     # Persistence Invariant: Unsafe scans cannot be persisted as normal cleared diagnoses
     if safety_state in ("MODEL_FAILURE", "ANATOMY_FAILED", "QUALITY_FAILED", "REJECTED"):
         detection_result = dict(detection_result)

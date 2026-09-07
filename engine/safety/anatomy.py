@@ -30,6 +30,7 @@ class AnatomyResult:
     laterality_confidence: float = 0.0
     laterality_mismatch: bool = False
     human_confirmation_required: bool = False
+    orientation_state: str = "UPRIGHT_VERIFIED"  # "UPRIGHT_VERIFIED" | "ROTATION_90_270_SUSPECTED" | "MIRROR_OR_INVERSION_SUSPECTED" | "EXIF_NON_STANDARD" | "ORIENTATION_UNCERTAIN"
     notes: List[str] = field(default_factory=list)
 
     @property
@@ -65,6 +66,7 @@ class AnatomyResult:
             "laterality_status": self.laterality_status,
             "resolution_method": self.resolution_method,
             "human_confirmation_required": self.human_confirmation_required,
+            "orientation_state": self.orientation_state,
             "notes": self.notes,
         }
 
@@ -83,19 +85,33 @@ def _normalize_eye(eye_str: Optional[str]) -> Optional[str]:
 
 def assess_anatomy_and_laterality(
     img_bgr: np.ndarray,
-    operator_eye: Optional[str] = None
+    operator_eye: Optional[str] = None,
+    exif_orientation: int = 1,
 ) -> AnatomyResult:
     """
-    Assess anatomical landmark validity and check consistency with operator selection.
+    Assess anatomical landmark validity, retinal orientation/mirroring, and check consistency with operator selection.
+    Policy: Under any detected rotation (90°/180°/270°), mirroring (horizontal/vertical flip), or non-standard EXIF tag,
+    do NOT silently normalize; suppress automatic spatial laterality inference and mandate human clinician confirmation.
     """
     notes = []
     norm_operator_eye = _normalize_eye(operator_eye)
+    orientation_state = "UPRIGHT_VERIFIED"
 
     if img_bgr is None or img_bgr.size == 0:
         return AnatomyResult(
             valid_anatomy=False,
             operator_selected_eye=norm_operator_eye,
+            orientation_state="ORIENTATION_UNCERTAIN",
             notes=["Empty image array provided for anatomical assessment."]
+        )
+
+    # 0. EXIF Orientation Metadata Gate
+    if exif_orientation not in (0, 1):
+        orientation_state = "EXIF_NON_STANDARD"
+        notes.append(
+            f"ORIENTATION_EXIF_NON_STANDARD: EXIF metadata specifies orientation tag {exif_orientation} "
+            "(rotation/mirroring indicated in camera metadata). In accordance with fail-safe policy, "
+            "automatic laterality inference is suppressed. Requires clinician confirmation."
         )
 
     h, w = img_bgr.shape[:2]
@@ -107,6 +123,7 @@ def assess_anatomy_and_laterality(
         return AnatomyResult(
             valid_anatomy=False,
             operator_selected_eye=norm_operator_eye,
+            orientation_state="ORIENTATION_UNCERTAIN",
             notes=[f"Landmark localization failed: {str(e)}"]
         )
 
@@ -114,13 +131,14 @@ def assess_anatomy_and_laterality(
         return AnatomyResult(
             valid_anatomy=False,
             operator_selected_eye=norm_operator_eye,
+            orientation_state="ORIENTATION_UNCERTAIN",
             notes=["Optic disc could not be reliably located."]
         )
 
     cx, cy = disc_center
     inferred_lat = "UNKNOWN"
     confidence = 0.0
-    valid_anatomy = True
+    valid_anatomy = (orientation_state == "UPRIGHT_VERIFIED")
 
     # 1.1 Optic disc boundary plausibility check: disc cannot touch the outer image edge
     border_margin = max(10, int(0.05 * min(h, w)))
@@ -149,10 +167,12 @@ def assess_anatomy_and_laterality(
             valid_anatomy = False
             notes.append(f"Implausible landmark geometry: disc-fovea separation exceeds anatomical limits (dist={dist:.1f}px).")
 
-        # Orientation anomaly check: disc-fovea axis is normally roughly horizontal (tilt < 35 deg)
-        # If vertical displacement strongly dominates horizontal (|dy| > 1.25 * |dx|), image is rotated (90°/270°)
+        # 2.1 Rotation Detection (90° / 270° Camera Rotation)
+        # Retinal disc-fovea axis is normally roughly horizontal. If vertical displacement strongly dominates horizontal,
+        # the camera has been rolled ~90° or ~270° (|dy| > 1.25 * |dx|).
         if abs(dy) > 1.25 * max(abs(dx), 1.0) and dist > 0.8 * expected_dd:
             valid_anatomy = False
+            orientation_state = "ROTATION_90_270_SUSPECTED"
             notes.append(
                 f"ORIENTATION_ANOMALY_SUSPECTED: Disc-fovea axis is predominantly vertical "
                 f"(|dy|={abs(dy):.1f} > 1.25*|dx|={abs(dx):.1f}). Possible 90°/270° rotation or landmark failure."
@@ -224,5 +244,6 @@ def assess_anatomy_and_laterality(
         laterality_confidence=confidence,
         laterality_mismatch=mismatch,
         human_confirmation_required=requires_confirmation,
+        orientation_state=orientation_state,
         notes=notes,
     )

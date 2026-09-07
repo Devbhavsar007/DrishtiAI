@@ -596,6 +596,17 @@ def api_scan_progression(scan_id):
         if not scan:
             return jsonify({"success": False, "error": "Scan not found."}), 404
 
+        # Gating on Safety State: Invariant — failed/unverified scans cannot enter progression calculations
+        curr_safety = str(scan.get("safety_state") or "").upper()
+        invalid_states = ("REJECTED", "ANATOMY_FAILED", "QUALITY_FAILED", "BLOCKED", "OOD_REVIEW", "MODEL_FAILURE", "LATERALITY_CONFLICT")
+        if curr_safety in invalid_states:
+            return jsonify({
+                "success": False,
+                "error": f"Cannot compute longitudinal progression: study has unverified/failed safety state '{curr_safety}'. Retake or clinical review required.",
+                "safety_state": curr_safety,
+                "progression_eligible": False,
+            }), 400
+
         patient_id = scan.get("patient_id")
         previous_scans = get_patient_scans(patient_id) if patient_id else []
         patient = get_patient(patient_id) if patient_id else None
@@ -613,6 +624,9 @@ def api_scan_progression(scan_id):
                 "id": scan.get("id"),
                 "stage": scan.get("stage"),
                 "confidence": scan.get("confidence"),
+                "laterality": scan.get("laterality") or scan.get("eye"),
+                "created_at": scan.get("created_at") or scan.get("timestamp"),
+                "safety_state": scan.get("safety_state"),
             },
             previous_scans=previous_scans,
             patient_profile=patient_profile,
@@ -1106,7 +1120,8 @@ def analyze():
 
         # Landmark and Laterality Assessment
         operator_eye = request.form.get("eye")
-        anatomy_res = assess_anatomy_and_laterality(raw_bgr, operator_eye=operator_eye)
+        exif_orient = getattr(val_result, "exif_orientation", 1)
+        anatomy_res = assess_anatomy_and_laterality(raw_bgr, operator_eye=operator_eye, exif_orientation=exif_orient)
 
         # Workflow Consistency Verification
         from database import check_workflow_image_consistency
@@ -1150,10 +1165,14 @@ def analyze():
             try:
                 if safety_eval.safety_state == "ANATOMY_FAILED":
                     target_state = ScreeningState.ANATOMY_FAILED
+                elif "LATERALITY_MISMATCH_SUSPECTED" in safety_eval.reason_codes:
+                    target_state = ScreeningState.LATERALITY_CONFLICT
                 elif safety_eval.safety_state == "QUALITY_FAILED":
                     target_state = ScreeningState.QUALITY_FAILED
                 elif safety_eval.safety_state == "MODEL_FAILURE":
                     target_state = ScreeningState.MODEL_FAILURE
+                elif safety_eval.safety_state == "OOD_REVIEW":
+                    target_state = ScreeningState.OOD_REVIEW
                 elif safety_eval.safety_state == "VERIFIED":
                     target_state = ScreeningState.SCREENING_COMPLETED
                 else:
@@ -1168,35 +1187,63 @@ def analyze():
             except Exception as se_err:
                 log.warning("Could not update session state for %s: %s", session_id, se_err)
 
-        # --- 5. Generate Heatmap (Auxiliary Failure Isolation) ---
-        heatmap_path = os.path.join(RESULTS_DIR, f"{analysis_id}_heatmap.png")
-        try:
-            heatmap_overlay, heatmap_raw = generate_gradcam(model_input, original, save_path=heatmap_path)
-            heatmap_analysis = get_heatmap_analysis(heatmap_raw)
-        except Exception as cam_err:
-            log.warning("Grad-CAM generation failed (auxiliary): %s", cam_err)
-            heatmap_overlay, heatmap_raw = None, None
+        # --- 5 & 6. Auxiliary Explainability & Segmentation (Isolated & Safety-Gated) ---
+        is_hard_safety_failure = safety_eval.safety_state in ("REJECTED", "ANATOMY_FAILED", "QUALITY_FAILED", "MODEL_FAILURE", "BLOCKED")
+        heatmap_overlay, heatmap_raw = None, None
+        vessel_map = None
+
+        if is_hard_safety_failure:
+            heatmap_path = ""
             heatmap_analysis = {
-                "status": "EXPLANATION_UNAVAILABLE",
-                "most_affected_region": "central",
-                "activity_intensity": "moderate",
+                "status": "EXPLANATION_UNAVAILABLE_DUE_TO_SAFETY_FAILURE",
+                "most_affected_region": "none",
+                "activity_intensity": "none",
                 "region_scores": {},
                 "explanation_available": False,
+                "safety_state": safety_eval.safety_state,
             }
-
-        # --- 6. Vessel Segmentation (Auxiliary Failure Isolation) ---
-        vessel_path = os.path.join(RESULTS_DIR, f"{analysis_id}_vessels.png")
-        try:
-            vessel_map, vessel_stats = segment_vessels(original, save_path=vessel_path)
-        except Exception as seg_err:
-            log.warning("Vessel segmentation failed (auxiliary): %s", seg_err)
-            vessel_map = None
+            vessel_path = ""
             vessel_stats = {
-                "status": "VESSELS_UNAVAILABLE",
+                "status": "VESSELS_UNAVAILABLE_DUE_TO_SAFETY_FAILURE",
                 "vessel_density_percent": 0.0,
-                "vessel_health_text": "Vessel segmentation unavailable.",
+                "vessel_health_text": "Vessel segmentation suppressed due to safety/anatomy failure.",
                 "vessel_available": False,
+                "safety_state": safety_eval.safety_state,
             }
+        else:
+            heatmap_path = os.path.join(RESULTS_DIR, f"{analysis_id}_heatmap.png")
+            try:
+                heatmap_overlay, heatmap_raw = generate_gradcam(model_input, original, save_path=heatmap_path)
+                heatmap_analysis = get_heatmap_analysis(heatmap_raw)
+            except Exception as cam_err:
+                log.warning("Grad-CAM generation failed (auxiliary): %s", cam_err)
+                heatmap_overlay, heatmap_raw = None, None
+                heatmap_analysis = {
+                    "status": "EXPLANATION_UNAVAILABLE",
+                    "most_affected_region": "central",
+                    "activity_intensity": "moderate",
+                    "region_scores": {},
+                    "explanation_available": False,
+                }
+
+            vessel_path = os.path.join(RESULTS_DIR, f"{analysis_id}_vessels.png")
+            try:
+                vessel_map, vessel_stats = segment_vessels(original, save_path=vessel_path)
+            except Exception as seg_err:
+                log.warning("Vessel segmentation failed (auxiliary): %s", seg_err)
+                vessel_map = None
+                vessel_stats = {
+                    "status": "VESSELS_UNAVAILABLE",
+                    "vessel_density_percent": 0.0,
+                    "vessel_health_text": "Vessel segmentation unavailable.",
+                    "vessel_available": False,
+                }
+
+            if safety_eval.safety_state != "VERIFIED":
+                heatmap_analysis["for_clinical_review_only"] = True
+                heatmap_analysis["screening_uncertain"] = True
+                vessel_stats["for_clinical_review_only"] = True
+                vessel_stats["screening_uncertain"] = True
 
         # --- 7. Gemma Report (Authoritative Safety Reflection) ---
         try:
@@ -1438,7 +1485,8 @@ def analyze_v2():
 
         # Landmark and Laterality Assessment
         operator_eye = request.form.get("eye")
-        anatomy_res = assess_anatomy_and_laterality(img_bgr, operator_eye=operator_eye)
+        exif_orient = getattr(val_result, "exif_orientation", 1)
+        anatomy_res = assess_anatomy_and_laterality(img_bgr, operator_eye=operator_eye, exif_orientation=exif_orient)
 
         # Workflow Consistency Verification
         from database import check_workflow_image_consistency
@@ -1835,7 +1883,8 @@ def analyze_v3():
 
         # Landmark and Laterality Assessment
         operator_eye = request.form.get("eye")
-        anatomy_res = assess_anatomy_and_laterality(raw_bgr, operator_eye=operator_eye)
+        exif_orient = getattr(val_result, "exif_orientation", 1)
+        anatomy_res = assess_anatomy_and_laterality(raw_bgr, operator_eye=operator_eye, exif_orientation=exif_orient)
 
         # Workflow Consistency Verification
         from database import check_workflow_image_consistency

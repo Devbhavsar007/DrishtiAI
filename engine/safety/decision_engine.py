@@ -166,30 +166,35 @@ class SafetyDecisionEngine:
             )
 
         # ── Gate 2b: Retinal Landmark & Anatomy Integrity Gate ──
-        if anatomy_res and not anatomy_res.valid_anatomy:
-            reasons = ["ANATOMY_DETECTION_FAILED"]
-            for note in anatomy_res.notes:
-                if "ORIENTATION_ANOMALY" in note:
-                    reasons.append("ORIENTATION_ANOMALY_SUSPECTED")
-                elif "boundary" in note.lower():
-                    reasons.append("LANDMARK_OUT_OF_BOUNDS")
-                elif "overlap" in note.lower() or "separation" in note.lower():
-                    reasons.append("LANDMARK_GEOMETRY_IMPLAUSIBLE")
-            guidance = (
-                "Retinal anatomical landmarks (optic disc/fovea) could not be reliably established. "
-                "Image may be ungradeable, misaligned, or off-center. Retake or ophthalmology review required."
-            )
-            return SafetyEvaluationResult(
-                screening_eligibility="INELIGIBLE",
-                safety_state="ANATOMY_FAILED",
-                automation_level="UNABLE_TO_CLASSIFY",
-                human_review_required=True,
-                confidence_score=0.0,
-                clinical_action_allowed=False,
-                reason_codes=sorted(list(set(reasons))),
-                mitigation_instructions=guidance,
-                audit_metadata=audit_meta,
-            )
+        if anatomy_res:
+            valid_anat = getattr(anatomy_res, "valid_anatomy", None)
+            if valid_anat is None and isinstance(anatomy_res, dict):
+                valid_anat = anatomy_res.get("valid_anatomy", True)
+            if valid_anat is False:
+                reasons = ["ANATOMY_DETECTION_FAILED"]
+                notes = getattr(anatomy_res, "notes", []) if not isinstance(anatomy_res, dict) else anatomy_res.get("notes", [])
+                for note in notes:
+                    if "ORIENTATION_ANOMALY" in note or "ORIENTATION_UNCERTAIN" in note or "ROTATION" in note:
+                        reasons.append("ORIENTATION_ANOMALY_SUSPECTED")
+                    elif "boundary" in note.lower():
+                        reasons.append("LANDMARK_OUT_OF_BOUNDS")
+                    elif "overlap" in note.lower() or "separation" in note.lower():
+                        reasons.append("LANDMARK_GEOMETRY_IMPLAUSIBLE")
+                guidance = (
+                    "Retinal anatomical landmarks (optic disc/fovea) could not be reliably established. "
+                    "Image may be ungradeable, misaligned, or off-center. Retake or ophthalmology review required."
+                )
+                return SafetyEvaluationResult(
+                    screening_eligibility="INELIGIBLE",
+                    safety_state="ANATOMY_FAILED",
+                    automation_level="UNABLE_TO_CLASSIFY",
+                    human_review_required=True,
+                    confidence_score=0.0,
+                    clinical_action_allowed=False,
+                    reason_codes=sorted(list(set(reasons))),
+                    mitigation_instructions=guidance,
+                    audit_metadata=audit_meta,
+                )
 
         # ── Accumulate Safety Signals and Reason Codes ──
         reason_codes: List[str] = []
@@ -205,12 +210,17 @@ class SafetyDecisionEngine:
                 instructions.append("Image quality is borderline; manual confirmation suggested.")
 
         # 1. Laterality Check
-        if anatomy_res and anatomy_res.laterality_mismatch:
+        lat_mismatch = getattr(anatomy_res, "laterality_mismatch", False) if anatomy_res else False
+        if not lat_mismatch and isinstance(anatomy_res, dict):
+            lat_mismatch = anatomy_res.get("laterality_mismatch", False)
+        if lat_mismatch:
             reason_codes.append("LATERALITY_MISMATCH_SUSPECTED")
             eligibility = "REQUIRES_CONFIRMATION"
+            op_eye = getattr(anatomy_res, "operator_selected_eye", None) if not isinstance(anatomy_res, dict) else anatomy_res.get("operator_selected_eye")
+            inf_eye = getattr(anatomy_res, "inferred_laterality", None) if not isinstance(anatomy_res, dict) else anatomy_res.get("inferred_laterality")
             instructions.append(
-                f"Operator selected eye ({anatomy_res.operator_selected_eye}) conflicts with detected anatomy "
-                f"({anatomy_res.inferred_laterality}). Operator confirmation required."
+                f"Operator selected eye ({op_eye}) conflicts with detected anatomy "
+                f"({inf_eye}). Operator confirmation required."
             )
 
         # 2. Screen / Moiré Capture Warning (Advisory)

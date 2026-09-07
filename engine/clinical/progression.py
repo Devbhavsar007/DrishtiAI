@@ -56,7 +56,8 @@ def _latest_previous_scan(
 
         # Invariant: Never consume previous scans that failed safety or anatomical verification
         prev_safety = str(s.get("safety_state") or "").upper()
-        if prev_safety in ("REJECTED", "ANATOMY_FAILED", "QUALITY_FAILED", "BLOCKED"):
+        invalid_states = ("REJECTED", "ANATOMY_FAILED", "QUALITY_FAILED", "BLOCKED", "OOD_REVIEW", "MODEL_FAILURE", "LATERALITY_CONFLICT")
+        if prev_safety in invalid_states:
             continue
         if s.get("valid_anatomy") is False:
             continue
@@ -80,11 +81,12 @@ def assess_progression_risk(
     """
     # Guard: Do not calculate progression from unsafe current scan
     curr_safety = str(current_scan.get("safety_state") or "").upper()
-    if curr_safety in ("REJECTED", "ANATOMY_FAILED", "QUALITY_FAILED") or current_scan.get("valid_anatomy") is False:
+    invalid_current_states = ("REJECTED", "ANATOMY_FAILED", "QUALITY_FAILED", "BLOCKED", "OOD_REVIEW", "MODEL_FAILURE", "LATERALITY_CONFLICT")
+    if curr_safety in invalid_current_states or current_scan.get("valid_anatomy") is False:
         return {
             "engine": "deterministic_progression_v1",
             "longitudinal_state": "LONGITUDINAL_UNAVAILABLE",
-            "progression_availability_message": "Progression prediction unavailable: current scan failed safety or anatomical validation.",
+            "progression_availability_message": f"Progression prediction unavailable: current scan has unverified safety state '{curr_safety or 'UNVERIFIED'}'.",
             "is_individualized_prediction": False,
             "observed_data": {
                 "current_stage": current_scan.get("stage"),

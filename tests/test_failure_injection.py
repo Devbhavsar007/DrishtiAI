@@ -290,5 +290,144 @@ class TestSafetyArbitrationAndLaterality(unittest.TestCase):
         self.assertFalse(res.clinical_action_allowed)
 
 
+class TestDownstreamAIFailureInjection(unittest.TestCase):
+    """Adversarial and failure-injection tests for downstream AI/ML components."""
+
+    def setUp(self):
+        app.config["TESTING"] = True
+        self.client = app.test_client()
+        token = create_access_token("test-hw", Role.HEALTH_WORKER.value)
+        self.client.environ_base["HTTP_AUTHORIZATION"] = f"Bearer {token}"
+
+    def test_gradcam_throws_isolated_gracefully(self):
+        """When Grad-CAM throws an unexpected runtime error, /analyze must not crash with 500."""
+        from unittest.mock import patch
+        from engine.safety.decision_engine import SafetyEvaluationResult
+        valid_bytes = _create_test_image()
+        data = {
+            "image": (io.BytesIO(valid_bytes), "valid_fundus.jpg"),
+            "eye": "OD",
+        }
+        mock_eval = SafetyEvaluationResult(
+            screening_eligibility="ELIGIBLE",
+            safety_state="VERIFIED",
+            automation_level="AUTOMATED_ASSISTANCE",
+            human_review_required=False,
+            confidence_score=90.0,
+            reason_codes=[],
+            clinical_action_allowed=True,
+        )
+        with patch("app.safety_engine.evaluate", return_value=mock_eval):
+            with patch("app.generate_gradcam", side_effect=RuntimeError("CUDA out of memory in Grad-CAM")):
+                res = self.client.post("/analyze", data=data, content_type="multipart/form-data")
+                self.assertEqual(res.status_code, 200)
+                payload = res.get_json()
+                self.assertTrue(payload["success"])
+                self.assertEqual(payload["heatmap_analysis"]["status"], "EXPLANATION_UNAVAILABLE")
+                self.assertFalse(payload["heatmap_analysis"]["explanation_available"])
+
+    def test_vessel_segmentation_throws_isolated_gracefully(self):
+        """When ONNX vessel segmentation throws, /analyze must return safe fallback without crashing."""
+        from unittest.mock import patch
+        from engine.safety.decision_engine import SafetyEvaluationResult
+        valid_bytes = _create_test_image()
+        data = {
+            "image": (io.BytesIO(valid_bytes), "valid_fundus.jpg"),
+            "eye": "OD",
+        }
+        mock_eval = SafetyEvaluationResult(
+            screening_eligibility="ELIGIBLE",
+            safety_state="VERIFIED",
+            automation_level="AUTOMATED_ASSISTANCE",
+            human_review_required=False,
+            confidence_score=90.0,
+            reason_codes=[],
+            clinical_action_allowed=True,
+        )
+        with patch("app.safety_engine.evaluate", return_value=mock_eval):
+            with patch("app.segment_vessels", side_effect=RuntimeError("ONNX Runtime execution failed")):
+                res = self.client.post("/analyze", data=data, content_type="multipart/form-data")
+                self.assertEqual(res.status_code, 200)
+                payload = res.get_json()
+                self.assertTrue(payload["success"])
+                self.assertEqual(payload["vessel_stats"]["status"], "VESSELS_UNAVAILABLE")
+                self.assertFalse(payload["vessel_stats"]["vessel_available"])
+
+    def test_gemma_report_throws_isolated_gracefully(self):
+        """When diagnostic report generator throws, /analyze must return safe report fallback with human review."""
+        from unittest.mock import patch
+        valid_bytes = _create_test_image()
+        data = {
+            "image": (io.BytesIO(valid_bytes), "valid_fundus.jpg"),
+            "eye": "OD",
+        }
+        with patch("app.generate_report", side_effect=RuntimeError("Gemma API connection timeout")):
+            res = self.client.post("/analyze", data=data, content_type="multipart/form-data")
+            self.assertEqual(res.status_code, 200)
+            payload = res.get_json()
+            self.assertTrue(payload["success"])
+            self.assertEqual(payload["report"]["status"], "REPORT_UNAVAILABLE")
+            self.assertEqual(payload["report"]["urgency"], "HUMAN_REVIEW_REQUIRED")
+
+    def test_model_nan_inf_confidence_handled_cleanly(self):
+        """NaN or Inf confidence outputs from model must be hard-blocked by SafetyDecisionEngine."""
+        from engine.safety.decision_engine import SafetyDecisionEngine
+        from engine.safety.image_validator import ImageValidationResult
+        engine = SafetyDecisionEngine()
+        val = ImageValidationResult(valid=True)
+
+        res_nan = engine.evaluate(image_val=val, primary_detection={"stage": 1, "confidence": float("nan")})
+        self.assertEqual(res_nan.safety_state, "BLOCKED")
+        self.assertIn("NUMERICAL_INSTABILITY_DETECTED", res_nan.reason_codes)
+
+        res_inf = engine.evaluate(image_val=val, primary_detection={"stage": 1, "confidence": float("inf")})
+        self.assertEqual(res_inf.safety_state, "BLOCKED")
+        self.assertIn("NUMERICAL_INSTABILITY_DETECTED", res_inf.reason_codes)
+
+    def test_model_malformed_stage_handled_cleanly(self):
+        """Invalid stage numbers (< 0 or > 4 or non-integer) must be hard-blocked."""
+        from engine.safety.decision_engine import SafetyDecisionEngine
+        from engine.safety.image_validator import ImageValidationResult
+        engine = SafetyDecisionEngine()
+        val = ImageValidationResult(valid=True)
+
+        res_high = engine.evaluate(image_val=val, primary_detection={"stage": 7, "confidence": 95.0})
+        self.assertEqual(res_high.safety_state, "BLOCKED")
+        self.assertIn("INVALID_STAGE_INDEX", res_high.reason_codes)
+
+        res_neg = engine.evaluate(image_val=val, primary_detection={"stage": -1, "confidence": 95.0})
+        self.assertEqual(res_neg.safety_state, "BLOCKED")
+        self.assertIn("INVALID_STAGE_INDEX", res_neg.reason_codes)
+
+        res_str = engine.evaluate(image_val=val, primary_detection={"stage": "STAGE_MALFORMED", "confidence": 95.0})
+        self.assertEqual(res_str.safety_state, "BLOCKED")
+        self.assertIn("INVALID_STAGE_FORMAT", res_str.reason_codes)
+
+    def test_progression_endpoint_blocks_invalid_safety_states(self):
+        """Scans with ANATOMY_FAILED, QUALITY_FAILED, or MODEL_FAILURE cannot enter progression calculation."""
+        import database
+        test_patient_id = database.create_patient("Test Progression Patient", age=55, gender="M")
+
+        # Save an anatomy-failed scan
+        database.save_scan(
+            scan_id="scan-anat-fail-1",
+            patient_id=test_patient_id,
+            detection_result={"stage": 3, "confidence": 90.0},
+            heatmap_analysis={},
+            vessel_stats={},
+            report={},
+            image_paths={},
+            processing_time=0.5,
+            safety_state="ANATOMY_FAILED",
+        )
+
+        res = self.client.post(f"/api/scans/scan-anat-fail-1/progression")
+        self.assertEqual(res.status_code, 400)
+        data = res.get_json()
+        self.assertFalse(data["success"])
+        self.assertFalse(data.get("progression_eligible", True))
+        self.assertIn("unverified", data["error"].lower())
+
+
 if __name__ == "__main__":
     unittest.main()
