@@ -392,11 +392,24 @@ def update_screening_session_state(
                         f"Illegal state transition from {current_state} to {new_state} by {actor_id}"
                     )
 
-        conn.execute(
-            "UPDATE screening_sessions SET current_state = ?, updated_at = datetime('now') WHERE session_id = ?",
-            (new_state, session_id)
+        is_human_override = (
+            (actor_role and actor_role.upper() in ("DOCTOR", "ADMIN", "HEALTH_WORKER")) or
+            actor_id.startswith("dr-") or "operator" in actor_id.lower() or "confirm" in reason.lower()
         )
-        _audit(conn, "SESSION_STATE_TRANSITION", "screening_session", session_id, f"to_state={new_state} reason={reason}", actor_id, "OPERATOR")
+        aut_level = "HUMAN_CONFIRMED" if (is_human_override and new_state in ("ANATOMY_VALIDATED", "FINALIZED") and ("override" in reason.lower() or "confirm" in reason.lower())) else None
+
+        if aut_level:
+            conn.execute(
+                "UPDATE screening_sessions SET current_state = ?, automation_level = ?, updated_at = datetime('now') WHERE session_id = ?",
+                (new_state, aut_level, session_id)
+            )
+        else:
+            conn.execute(
+                "UPDATE screening_sessions SET current_state = ?, updated_at = datetime('now') WHERE session_id = ?",
+                (new_state, session_id)
+            )
+        audit_details = f"to_state={new_state} reason={reason} is_human_override={bool(aut_level == 'HUMAN_CONFIRMED')}"
+        _audit(conn, "SESSION_STATE_TRANSITION", "screening_session", session_id, audit_details, actor_id, actor_role or "OPERATOR")
         conn.commit()
 
 
@@ -646,6 +659,35 @@ def check_workflow_image_consistency(
                     warnings.append(
                         f"WORKFLOW_LATERALITY_STUDY_CONFLICT: CROSS_EYE_IMAGE_REUSE_DETECTED - Image previously submitted as {r['laterality']} for scan {r['id']}."
                     )
+                if patient_id and r["patient_id"] == patient_id and session_id and str(r["id"]) != str(session_id):
+                    warnings.append(
+                        f"WORKFLOW_HISTORICAL_IMAGE_REUSE: Prior scan {r['id']} matches submitted image for this patient."
+                    )
+
+        if dhash:
+            # Check perceptual hash against past scans if dhash length is 16 hex characters
+            try:
+                cur_val = int(dhash, 16)
+                past_scans = conn.execute("SELECT id, patient_id, laterality, image_hash FROM scans").fetchall()
+                for s in past_scans:
+                    shash = s["image_hash"]
+                    if shash and len(shash) == 16:
+                        try:
+                            s_val = int(shash, 16)
+                            dist = bin(cur_val ^ s_val).count("1")
+                            if dist <= 4:
+                                if patient_id and s["patient_id"] != patient_id:
+                                    warnings.append(
+                                        f"WORKFLOW_CROSS_PATIENT_DUPLICATE: CROSS_PATIENT_DUPLICATE_IMAGE_DETECTED - Perceptual dHash matches scan {s['id']} of patient {s['patient_id']} (Hamming dist={dist})."
+                                    )
+                                if eye and s["laterality"] and str(eye).upper() != str(s["laterality"]).upper():
+                                    warnings.append(
+                                        f"WORKFLOW_LATERALITY_STUDY_CONFLICT: CROSS_EYE_IMAGE_REUSE_DETECTED - Perceptual dHash matches opposite eye {s['laterality']} for scan {s['id']} (Hamming dist={dist})."
+                                    )
+                        except (ValueError, TypeError):
+                            pass
+            except (ValueError, TypeError):
+                pass
 
     return list(set(warnings))
 

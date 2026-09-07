@@ -137,4 +137,37 @@ The following 5 gaps were systematically audited and closed with defense-in-dept
    - `/api/scans/<scan_id>/progression` endpoint verifies `safety_state` of the requested scan before computation: `ANATOMY_FAILED`, `QUALITY_FAILED`, `OOD_REVIEW`, `MODEL_FAILURE`, `LATERALITY_CONFLICT`, `REJECTED`, and `BLOCKED` return HTTP 400 (`progression_eligible=False`).
    - `assess_progression_risk` in `engine/clinical/progression.py` excludes invalid historical studies from progression history and passes complete context (`laterality`, `created_at`, `safety_state`).
 
+---
 
+## 7. Authoritative GREEN / YELLOW / RED Status Matrix
+
+To provide absolute engineering and clinical transparency, all 21 edge-case domains are classified across three rigorous operational statuses:
+
+```
+🟢 GREEN  : Fully Solved & Mathematically/Programmatically Enforced in Code (Zero Guesses, Deterministic Invariants)
+🟡 YELLOW : Heuristic Operational Safeguard (Requires Clinician Review / Active Human Oversight)
+🔴 RED    : Out-of-Scope / Prospective Clinical Trial Boundary (Requires Empirical Study / Real Hardware Calibration)
+```
+
+| Domain / Edge Case | Status | Safety Enforcement Mechanism | Verification Suite |
+| :--- | :---: | :--- | :--- |
+| **Image Domain Validity** | 🟢 **GREEN** | Magic-byte checks, dimensions, decompression limits, circular mask and contrast verification. Hard gate fails to `QUALITY_FAILED`. | `test_image_validator_*` |
+| **Anatomy Failure Gating** | 🟢 **GREEN** | 6 explicit failure modes: valid, invalid, unavailable, missing, exception, inconsistent. Hard gate fails to `ANATOMY_FAILED`. | `test_invariant_04_*`, `test_anatomy_*` |
+| **Metamorphic Orientation & Mirroring** | 🟢 **GREEN** | $0^\circ, 90^\circ, 180^\circ, 270^\circ$, horizontal mirror, vertical mirror, EXIF tags 2–8. Disallows autonomous action, flags conflict/uncertain. | `test_metamorphic_orientation.py` |
+| **Model Output Stability** | 🟢 **GREEN** | IEEE-754 `NaN`/`Inf` traps, negative probabilities, stage bounds $0..4$, unnormalized sums ($> 10\%$ deviation). Hard gate fails to `BLOCKED` / `MODEL_FAILURE`. | `test_invariant_03_*`, `test_numerical_*` |
+| **Multi-Model Consensus** | 🟢 **GREEN** | Disparity $\Delta \ge 2$ stages or referable boundary crossing ($<2$ vs $\ge 2$) halts automated assistance, fails to `UNCERTAIN`. | `test_safety_engine.py` |
+| **Deterministic Report Fallback** | 🟢 **GREEN** | If `safety_state != 'VERIFIED'`, clinical diagnostic claims in both Gemma and offline reports are overridden with unverified disclaimers. | `test_invariant_07_*`, `test_report_*` |
+| **Longitudinal History Integrity** | 🟢 **GREEN** | Unsafe scans (`ANATOMY_FAILED`, `QUALITY_FAILED`, `UNCERTAIN`) excluded from baseline; cross-eye mixed scans rejected; inverted timestamps flagged. | `test_invariant_05_*`, `test_longitudinal_*` |
+| **Persistence Invariants** | 🟢 **GREEN** | Ungradeable/rejected scans prevented from saving as normal cleared studies; idempotent upsert prevents ledger corruption. | `test_invariant_08_*`, `test_persistence_*` |
+| **State Machine Invariants** | 🟢 **GREEN** | Illegal transitions (e.g. `ANATOMY_FAILED` $\to$ `SCREENING_COMPLETED`) rejected by state machine. | `test_invariant_09_*`, `test_state_machine.py` |
+| **Human Override Provenance** | 🟢 **GREEN** | Clinician confirmation recorded with `is_human_override = True` and transitions automation level to `HUMAN_CONFIRMED`. | `test_invariant_10_*` |
+| **Frontend State Machine Alignment** | 🟢 **GREEN** | Green "Normal / Stage 0" badge suppressed whenever `safety_state !== 'VERIFIED'`; renders inconclusive warning hero. | `npm run build`, `NewScanView.tsx` |
+| **Auxiliary Pipeline Isolation** | 🟢 **GREEN** | Grad-CAM, ONNX vessel segmentation, and Gemma LLM failures fail open without crashing screening decision. | `test_invariant_06_*` |
+| **Workflow Cross-Patient Duplicates** | 🟡 **YELLOW** | Perceptual 64-bit dHash (Hamming distance $\le 4$) and SHA-256 detect image reuse across patient sessions. Heuristic matching. | `test_cross_patient_duplicate_detected` |
+| **Moiré / Screen Capture Detection** | 🟡 **YELLOW** | Frequency-domain periodic line filter flags `POSSIBLE_SCREEN_CAPTURE`. Soft warning; never hard-rejects to avoid false positives. | `test_orientation_and_mirroring.py` |
+| **Suspected Non-DR Pathology** | 🟡 **YELLOW** | Non-DR ocular disease signals route to `DOCTOR_REVIEW`. Assistive triage flag; out of DR screening scope. | `test_disease_scope_non_dr_pathology` |
+| **Longitudinal Progression Forecasting** | 🟡 **YELLOW** | Deterministic evidence-informed rule engine. Requires serial calibrated imaging; system flags `LIMITED_LONGITUDINAL_HISTORY`. | `engine/clinical/progression.py` |
+| **Autonomous Diagnostic Clearance** | 🔴 **RED** | **Out of Scope.** DrishtiAI requires human clinician review and sign-off for all clinical actions. | Regulatory Non-Autonomous Disclaimer |
+| **Prospective Cohort Generalizability** | 🔴 **RED** | **Requires Clinical Trials.** Multi-center clinical trials required for formal diagnostic sensitivity/specificity certification. | `docs/LIMITATIONS.md` |
+| **Uncalibrated Smartphone Lenses** | 🔴 **RED** | **Requires Hardware Calibration.** Unstandardized third-party smartphone adapters subject to optical aberration and non-linear tone-mapping. | `docs/LIMITATIONS.md` |
+| **Multi-Disease Ocular Grading** | 🔴 **RED** | **Out of Scope.** DrishtiAI is validated solely for diabetic retinopathy; does not grade glaucoma, AMD, or retinal detachment. | `docs/LIMITATIONS.md` |

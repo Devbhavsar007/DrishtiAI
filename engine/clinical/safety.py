@@ -49,6 +49,7 @@ def evaluate_safety(
         primary_detection=pred,
         secondary_detection=sec,
         quality_assessment=qa,
+        require_anatomy=bool(kwargs.get("require_anatomy", False)),
     )
 
     # Reconcile legacy reason codes for contract parity while preserving canonical strings

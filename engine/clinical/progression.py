@@ -56,7 +56,11 @@ def _latest_previous_scan(
 
         # Invariant: Never consume previous scans that failed safety or anatomical verification
         prev_safety = str(s.get("safety_state") or "").upper()
-        invalid_states = ("REJECTED", "ANATOMY_FAILED", "QUALITY_FAILED", "BLOCKED", "OOD_REVIEW", "MODEL_FAILURE", "LATERALITY_CONFLICT")
+        invalid_states = (
+            "REJECTED", "ANATOMY_FAILED", "QUALITY_FAILED", "BLOCKED",
+            "OOD_REVIEW", "MODEL_FAILURE", "LATERALITY_CONFLICT",
+            "UNCERTAIN", "SCREENING_UNCERTAIN", "RECOVERY_REQUIRED"
+        )
         if prev_safety in invalid_states:
             continue
         if s.get("valid_anatomy") is False:
@@ -81,7 +85,11 @@ def assess_progression_risk(
     """
     # Guard: Do not calculate progression from unsafe current scan
     curr_safety = str(current_scan.get("safety_state") or "").upper()
-    invalid_current_states = ("REJECTED", "ANATOMY_FAILED", "QUALITY_FAILED", "BLOCKED", "OOD_REVIEW", "MODEL_FAILURE", "LATERALITY_CONFLICT")
+    invalid_current_states = (
+        "REJECTED", "ANATOMY_FAILED", "QUALITY_FAILED", "BLOCKED",
+        "OOD_REVIEW", "MODEL_FAILURE", "LATERALITY_CONFLICT",
+        "UNCERTAIN", "SCREENING_UNCERTAIN", "RECOVERY_REQUIRED"
+    )
     if curr_safety in invalid_current_states or current_scan.get("valid_anatomy") is False:
         return {
             "engine": "deterministic_progression_v1",
@@ -151,11 +159,17 @@ def assess_progression_risk(
                 c_dt = datetime.fromisoformat(c_time_str.replace("Z", "+00:00"))
                 p_dt = datetime.fromisoformat(p_time_str.replace("Z", "+00:00"))
                 delta = c_dt - p_dt
-                days = abs(delta.days if hasattr(delta, "days") else int(delta.total_seconds() / 86400))
-                if days < 7:
-                    uncertainty_flags.append("ACUTE_REPEAT_SCAN_SUPPRESSED: scan interval < 7 days; acute duplicate capture suspected")
-                elif days > 36 * 30:
-                    uncertainty_flags.append("EXTENDED_GAP_REDUCED_FIDELITY: long scan interval (> 36 months); historical baseline has reduced predictive fidelity")
+                total_seconds = delta.total_seconds()
+                if total_seconds < 0:
+                    uncertainty_flags.append("CONTRADICTORY_TIMESTAMPS_DETECTED: current scan timestamp precedes historical baseline")
+                else:
+                    days = int(total_seconds / 86400)
+                    if days < 7:
+                        uncertainty_flags.append("ACUTE_REPEAT_SCAN_SUPPRESSED: scan interval < 7 days; acute duplicate capture suspected")
+                    if days > 36 * 30:
+                        uncertainty_flags.append("EXTENDED_GAP_REDUCED_FIDELITY: long scan interval (> 36 months); historical baseline has reduced predictive fidelity")
+                    if days > 5 * 365:
+                        uncertainty_flags.append("EXTENDED_GAP_BASELINE_EXPIRED: scan interval > 5 years; baseline expired for longitudinal trend")
         except Exception:
             pass
 
@@ -205,6 +219,12 @@ def assess_progression_risk(
     elif current_scan.get("stage") is None and current_scan.get("detection") is None:
         longitudinal_state = "LONGITUDINAL_UNAVAILABLE"
         progression_msg = "Progression prediction unavailable: current scan data incomplete."
+    elif any("CONTRADICTORY_TIMESTAMPS_DETECTED" in f for f in uncertainty_flags):
+        longitudinal_state = "LONGITUDINAL_UNAVAILABLE"
+        progression_msg = "Progression analysis suppressed: contradictory temporal sequence."
+    elif any("EXTENDED_GAP_BASELINE_EXPIRED" in f for f in uncertainty_flags):
+        longitudinal_state = "LIMITED_LONGITUDINAL_HISTORY"
+        progression_msg = "Progression analysis suppressed: historical baseline expired (> 5 years)."
     elif any("scan interval < 7 days" in f for f in uncertainty_flags):
         longitudinal_state = "LIMITED_LONGITUDINAL_HISTORY"
         progression_msg = "Progression analysis suppressed: scan interval < 7 days."

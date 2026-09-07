@@ -855,31 +855,60 @@ export const NewScanView: React.FC = () => {
             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
               {/* Left: Large Circular Severity Badge */}
               <div className="flex items-center gap-5">
-                <div
-                  className="flex flex-col items-center justify-center w-20 h-20 sm:w-24 sm:h-24 rounded-3xl shadow-xl text-white font-black shrink-0 border-4 border-white"
-                  style={{ backgroundColor: DR_STAGES[activeScan.detection.stage].color }}
-                >
-                  <span className="text-2xl sm:text-3xl">
-                    {DR_STAGES[activeScan.detection.stage].icon}
-                  </span>
-                  <span className="text-xs sm:text-sm uppercase tracking-wider font-mono">
-                    Stage {activeScan.detection.stage}
-                  </span>
-                </div>
+                {(() => {
+                  const isVerified = activeScan.safety_state === 'VERIFIED';
+                  const isHardFailure = ['REJECTED', 'BLOCKED', 'ANATOMY_FAILED', 'QUALITY_FAILED', 'MODEL_FAILURE', 'RECOVERY_REQUIRED'].includes(activeScan.safety_state || '');
+                  const badgeColor = isVerified
+                    ? DR_STAGES[activeScan.detection.stage].color
+                    : isHardFailure
+                    ? '#DC2626'
+                    : '#D97706';
+                  const stageIcon = isVerified
+                    ? DR_STAGES[activeScan.detection.stage].icon
+                    : isHardFailure
+                    ? '!'
+                    : '⚠';
+                  const labelText = isVerified
+                    ? `Stage ${activeScan.detection.stage}`
+                    : activeScan.safety_state || 'UNCERTAIN';
+
+                  return (
+                    <div
+                      className="flex flex-col items-center justify-center w-20 h-20 sm:w-24 sm:h-24 rounded-3xl shadow-xl text-white font-black shrink-0 border-4 border-white"
+                      style={{ backgroundColor: badgeColor }}
+                    >
+                      <span className="text-2xl sm:text-3xl">
+                        {stageIcon}
+                      </span>
+                      <span className="text-[10px] sm:text-xs uppercase tracking-wider font-mono text-center px-1 truncate max-w-full">
+                        {labelText}
+                      </span>
+                    </div>
+                  );
+                })()}
 
                 <div className="space-y-1">
                   <div className="flex flex-wrap items-center gap-2">
                     <h1 className="text-2xl sm:text-4xl font-black text-black font-sans">
-                      {DR_STAGES[activeScan.detection.stage].name}
+                      {activeScan.safety_state === 'VERIFIED'
+                        ? DR_STAGES[activeScan.detection.stage].name
+                        : 'Screening Inconclusive — Review Required'}
                     </h1>
                     <span
                       className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black border ${
-                        activeScan.report.urgency === 'IMMEDIATE' || activeScan.report.urgency === 'URGENT'
+                        activeScan.safety_state !== 'VERIFIED'
+                          ? 'bg-amber-100 text-amber-900 border-amber-300'
+                          : activeScan.report.urgency === 'IMMEDIATE' || activeScan.report.urgency === 'URGENT'
                           ? 'bg-rose-100 text-rose-800 border-rose-200'
-                          : 'bg-amber-100 text-amber-900 border-amber-200'
+                          : 'bg-emerald-100 text-emerald-900 border-emerald-200'
                       }`}
                     >
-                      {activeScan.report.urgency === 'IMMEDIATE' ? (
+                      {activeScan.safety_state !== 'VERIFIED' ? (
+                        <>
+                          <AlertTriangle className="w-3.5 h-3.5 text-amber-700" />
+                          <span>HUMAN REVIEW REQUIRED</span>
+                        </>
+                      ) : activeScan.report.urgency === 'IMMEDIATE' ? (
                         <>
                           <AlertOctagon className="w-3.5 h-3.5 text-rose-700" />
                           <span>EMERGENCY</span>
@@ -971,20 +1000,20 @@ export const NewScanView: React.FC = () => {
                   Safety State
                 </span>
                 <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-black ${
-                  (activeScan.safety_state || 'PASS') === 'PASS' || activeScan.safety_state === 'VERIFIED'
+                  activeScan.safety_state === 'VERIFIED'
                     ? 'bg-emerald-100 text-emerald-800'
-                    : ['REJECTED', 'BLOCKED', 'ANATOMY_FAILED', 'QUALITY_FAILED', 'MODEL_FAILURE'].includes(activeScan.safety_state || '')
+                    : ['REJECTED', 'BLOCKED', 'ANATOMY_FAILED', 'QUALITY_FAILED', 'MODEL_FAILURE', 'RECOVERY_REQUIRED'].includes(activeScan.safety_state || '')
                     ? 'bg-rose-100 text-rose-800'
                     : 'bg-amber-100 text-amber-800'
                 }`}>
-                  {(activeScan.safety_state || 'PASS') === 'PASS' || activeScan.safety_state === 'VERIFIED' ? (
+                  {activeScan.safety_state === 'VERIFIED' ? (
                     <CheckCircle2 className="w-3.5 h-3.5 text-emerald-700" />
-                  ) : ['REJECTED', 'BLOCKED', 'ANATOMY_FAILED', 'QUALITY_FAILED', 'MODEL_FAILURE'].includes(activeScan.safety_state || '') ? (
+                  ) : ['REJECTED', 'BLOCKED', 'ANATOMY_FAILED', 'QUALITY_FAILED', 'MODEL_FAILURE', 'RECOVERY_REQUIRED'].includes(activeScan.safety_state || '') ? (
                     <AlertOctagon className="w-3.5 h-3.5 text-rose-700" />
                   ) : (
                     <AlertTriangle className="w-3.5 h-3.5 text-amber-700" />
                   )}
-                  {activeScan.safety_state || 'PASS'}
+                  {activeScan.safety_state || 'UNCERTAIN'}
                 </span>
               </div>
 
@@ -1057,12 +1086,15 @@ export const NewScanView: React.FC = () => {
             )}
 
             {/* Warning if Review is Required */}
-            {(activeScan.safety_state && activeScan.safety_state !== 'PASS' && activeScan.safety_state !== 'VERIFIED') && (
-              <div className="p-3.5 rounded-2xl bg-amber-50 border border-amber-300 flex items-start gap-2.5 text-xs text-amber-950">
-                <AlertTriangle className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+            {(activeScan.safety_state !== 'VERIFIED') && (
+              <div className="p-4 rounded-2xl bg-amber-50 border-2 border-amber-300 flex items-start gap-3 text-xs text-amber-950 shadow-sm">
+                <AlertTriangle className="w-5 h-5 text-amber-700 shrink-0 mt-0.5" />
                 <div>
-                  <strong className="block font-bold mb-0.5">Clinical Review Mandatory:</strong>
-                  The safety gate flagged an edge case or uncertainty. Ophthalmologist review is required before clinical referral or discharge.
+                  <strong className="block font-bold mb-0.5 text-sm text-amber-900">
+                    Clinical Review Mandatory — Automated Screening Suppressed:
+                  </strong>
+                  The safety gate flagged an edge case or unverified state ({activeScan.safety_state || 'UNCERTAIN'}).
+                  This screening record must NOT be interpreted as normal, cleared, or definitive. Comprehensive evaluation by an ophthalmologist or image recapture is required before clinical referral or discharge.
                 </div>
               </div>
             )}

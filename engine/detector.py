@@ -287,20 +287,90 @@ def _predict_tensorflow(image, model):
 
 def validate_model_output(prediction: dict | None) -> bool:
     """Validate that model output dictionary adheres to safety and structural contracts."""
-    if not isinstance(prediction, dict):
-        return False
+    valid, _ = validate_model_output_detailed(prediction)
+    return valid
+
+
+def validate_model_output_detailed(prediction: dict | None) -> tuple[bool, str | None]:
+    """
+    Validate that model output dictionary adheres to safety and structural contracts.
+    Returns (is_valid: bool, reason_code: str | None).
+    Handles:
+      - null, empty, or non-dict prediction
+      - unexpected class or invalid class index (<0 or >4)
+      - negative probability, probability > 100%
+      - IEEE-754 non-finite values (NaN, +Inf, -Inf)
+      - probability distribution not approximately summing to 1 (or 100)
+      - invalid confidence (< 0 or > 100 or non-finite)
+    """
+    import math
+
+    if not isinstance(prediction, dict) or not prediction:
+        return False, "MODEL_OUTPUT_MISSING_OR_EMPTY"
+
+    # Check model_available / primary_failure flags
+    if prediction.get("model_available") is False or prediction.get("primary_failure") is True:
+        if not prediction.get("fallback_used"):
+            return False, "MODEL_FAILURE"
+
     if "stage" not in prediction or "confidence" not in prediction:
-        return False
+        return False, "MODEL_OUTPUT_MISSING_FIELDS"
+
+    # Validate stage
+    raw_stage = prediction.get("stage")
     try:
-        stage = int(prediction["stage"])
-        conf = float(prediction["confidence"])
-        if stage < 0 or stage > 4:
-            return False
+        if raw_stage is None or isinstance(raw_stage, (bool, list, dict)):
+            return False, "INVALID_STAGE_FORMAT"
+        stage = int(raw_stage)
+        if stage not in (0, 1, 2, 3, 4):
+            return False, "INVALID_STAGE_INDEX"
+    except (ValueError, TypeError):
+        return False, "INVALID_STAGE_FORMAT"
+
+    # Validate confidence
+    raw_conf = prediction.get("confidence")
+    try:
+        if raw_conf is None or isinstance(raw_conf, (bool, list, dict)):
+            return False, "INVALID_CONFIDENCE_FORMAT"
+        conf = float(raw_conf)
+        if math.isnan(conf) or math.isinf(conf):
+            return False, "NUMERICAL_INSTABILITY_DETECTED"
         if conf < 0.0 or conf > 100.0:
-            return False
-        return True
-    except (TypeError, ValueError):
-        return False
+            return False, "CONFIDENCE_OUT_OF_BOUNDS"
+    except (ValueError, TypeError):
+        return False, "INVALID_CONFIDENCE_FORMAT"
+
+    # Validate all_probabilities if present
+    probs = prediction.get("all_probabilities")
+    if probs is not None:
+        if not isinstance(probs, dict):
+            return False, "PROBABILITY_DISTRIBUTION_MALFORMED"
+        try:
+            prob_vals = []
+            for k, v in probs.items():
+                pv = float(v)
+                if math.isnan(pv) or math.isinf(pv):
+                    return False, "NUMERICAL_INSTABILITY_DETECTED"
+                if pv < 0.0:
+                    return False, "NEGATIVE_PROBABILITY_DETECTED"
+                prob_vals.append(pv)
+            p_sum = sum(prob_vals)
+            if p_sum > 2.0:
+                # 0-100% scale
+                if any(pv > 100.0 for pv in prob_vals):
+                    return False, "PROBABILITY_EXCEEDS_100_PERCENT"
+                if abs(p_sum - 100.0) > 10.0:
+                    return False, "PROBABILITY_DISTRIBUTION_UNNORMALIZED"
+            else:
+                # 0-1.0 scale
+                if any(pv > 1.0 for pv in prob_vals):
+                    return False, "PROBABILITY_EXCEEDS_100_PERCENT"
+                if abs(p_sum - 1.0) > 0.10:
+                    return False, "PROBABILITY_DISTRIBUTION_UNNORMALIZED"
+        except (ValueError, TypeError):
+            return False, "PROBABILITY_DISTRIBUTION_MALFORMED"
+
+    return True, None
 
 
 def _mock_prediction():

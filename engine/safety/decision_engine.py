@@ -105,6 +105,7 @@ class SafetyDecisionEngine:
         quality_assessment: Optional[Dict[str, Any]] = None,
         operator_id: Optional[str] = None,
         patient_id: Optional[str] = None,
+        require_anatomy: bool = False,
     ) -> SafetyEvaluationResult:
         """
         Arbitrate all clinical, image, and model signals into a deterministic decision.
@@ -166,24 +167,93 @@ class SafetyDecisionEngine:
             )
 
         # ── Gate 2b: Retinal Landmark & Anatomy Integrity Gate ──
-        if anatomy_res:
-            valid_anat = getattr(anatomy_res, "valid_anatomy", None)
-            if valid_anat is None and isinstance(anatomy_res, dict):
-                valid_anat = anatomy_res.get("valid_anatomy", True)
-            if valid_anat is False:
-                reasons = ["ANATOMY_DETECTION_FAILED"]
-                notes = getattr(anatomy_res, "notes", []) if not isinstance(anatomy_res, dict) else anatomy_res.get("notes", [])
-                for note in notes:
-                    if "ORIENTATION_ANOMALY" in note or "ORIENTATION_UNCERTAIN" in note or "ROTATION" in note:
-                        reasons.append("ORIENTATION_ANOMALY_SUSPECTED")
-                    elif "boundary" in note.lower():
-                        reasons.append("LANDMARK_OUT_OF_BOUNDS")
-                    elif "overlap" in note.lower() or "separation" in note.lower():
-                        reasons.append("LANDMARK_GEOMETRY_IMPLAUSIBLE")
-                guidance = (
-                    "Retinal anatomical landmarks (optic disc/fovea) could not be reliably established. "
-                    "Image may be ungradeable, misaligned, or off-center. Retake or ophthalmology review required."
-                )
+        # Explicitly distinguish:
+        # A. Valid anatomy: valid_anatomy is True, landmarks geometrically plausible
+        # B. Invalid anatomy: valid_anatomy is False
+        # C. Anatomy unavailable: status UNAVAILABLE or available is False
+        # D. Anatomy result missing: valid_anatomy is None or dictionary is empty
+        # E. Anatomy exception: exception or error payload
+        # F. Anatomy internally inconsistent: contradictory coordinates, impossible geometry
+        if require_anatomy and anatomy_res is None:
+            return SafetyEvaluationResult(
+                screening_eligibility="INELIGIBLE",
+                safety_state="ANATOMY_FAILED",
+                automation_level="UNABLE_TO_CLASSIFY",
+                human_review_required=True,
+                confidence_score=0.0,
+                clinical_action_allowed=False,
+                reason_codes=["ANATOMY_RESULT_MISSING"],
+                mitigation_instructions="Anatomical landmark evaluation missing. Screening cannot proceed without verified retinal anatomy.",
+                audit_metadata=audit_meta,
+            )
+
+        if anatomy_res is not None:
+            anatomy_failed = False
+            anatomy_reasons = []
+            guidance = "Retinal anatomical landmarks (optic disc/fovea) could not be reliably established. Retake or ophthalmology review required."
+
+            # E. Anatomy Exception
+            if isinstance(anatomy_res, Exception) or (isinstance(anatomy_res, dict) and ("exception" in anatomy_res or "error" in anatomy_res)):
+                anatomy_failed = True
+                anatomy_reasons.append("ANATOMY_EXCEPTION")
+                guidance = f"Anatomical assessment raised an exception: {str(anatomy_res)}"
+
+            # C. Anatomy Unavailable
+            elif (isinstance(anatomy_res, dict) and (anatomy_res.get("available") is False or str(anatomy_res.get("status", "")).upper() == "UNAVAILABLE")) or getattr(anatomy_res, "available", True) is False:
+                anatomy_failed = True
+                anatomy_reasons.append("ANATOMY_UNAVAILABLE")
+                guidance = "Anatomical analysis service unavailable. Manual clinician inspection required."
+
+            # D. Anatomy Result Missing / Malformed
+            elif (isinstance(anatomy_res, dict) and len(anatomy_res) == 0) or (isinstance(anatomy_res, dict) and "valid_anatomy" not in anatomy_res):
+                anatomy_failed = True
+                anatomy_reasons.append("ANATOMY_RESULT_MISSING")
+                guidance = "Anatomical assessment dictionary contains no landmark data or valid_anatomy field."
+
+            else:
+                valid_anat = getattr(anatomy_res, "valid_anatomy", None) if not isinstance(anatomy_res, dict) else anatomy_res.get("valid_anatomy")
+                if valid_anat is None:
+                    anatomy_failed = True
+                    anatomy_reasons.append("ANATOMY_RESULT_MISSING")
+                    guidance = "Anatomy assessment valid_anatomy is null/missing. Fails safe."
+
+                # B. Invalid Anatomy
+                elif valid_anat is False:
+                    anatomy_failed = True
+                    anatomy_reasons.append("ANATOMY_DETECTION_FAILED")
+                    notes = getattr(anatomy_res, "notes", []) if not isinstance(anatomy_res, dict) else anatomy_res.get("notes", [])
+                    for note in notes:
+                        if "ORIENTATION_ANOMALY" in note or "ORIENTATION_UNCERTAIN" in note or "ROTATION" in note:
+                            anatomy_reasons.append("ORIENTATION_ANOMALY_SUSPECTED")
+                        elif "boundary" in note.lower():
+                            anatomy_reasons.append("LANDMARK_OUT_OF_BOUNDS")
+                        elif "overlap" in note.lower() or "separation" in note.lower():
+                            anatomy_reasons.append("LANDMARK_GEOMETRY_IMPLAUSIBLE")
+                        elif "missing" in note.lower() or "not reliably located" in note.lower():
+                            anatomy_reasons.append("LANDMARK_MISSING")
+
+                # F. Internally Inconsistent Anatomy
+                elif valid_anat is True:
+                    disc_center = getattr(anatomy_res, "disc_center", None) if not isinstance(anatomy_res, dict) else anatomy_res.get("disc_center")
+                    fovea_center = getattr(anatomy_res, "fovea_center", None) if not isinstance(anatomy_res, dict) else anatomy_res.get("fovea_center")
+                    notes = getattr(anatomy_res, "notes", []) if not isinstance(anatomy_res, dict) else anatomy_res.get("notes", [])
+
+                    if disc_center and (disc_center[0] < 0 or disc_center[1] < 0):
+                        anatomy_failed = True
+                        anatomy_reasons.extend(["ANATOMY_INTERNALLY_INCONSISTENT", "LANDMARK_OUT_OF_BOUNDS"])
+                        guidance = "Internal inconsistency: Optic disc coordinates negative."
+                    elif disc_center and fovea_center:
+                        dist = ((disc_center[0] - fovea_center[0]) ** 2 + (disc_center[1] - fovea_center[1]) ** 2) ** 0.5
+                        if dist < 5.0:
+                            anatomy_failed = True
+                            anatomy_reasons.extend(["ANATOMY_INTERNALLY_INCONSISTENT", "LANDMARK_GEOMETRY_IMPLAUSIBLE"])
+                            guidance = "Internal inconsistency: Disc and fovea overlap (< 5px distance)."
+                    elif any("implausible" in str(n).lower() or "boundary" in str(n).lower() for n in notes):
+                        anatomy_failed = True
+                        anatomy_reasons.append("ANATOMY_INTERNALLY_INCONSISTENT")
+                        guidance = "Internal inconsistency: Landmarking notes indicate boundary or geometric conflict."
+
+            if anatomy_failed:
                 return SafetyEvaluationResult(
                     screening_eligibility="INELIGIBLE",
                     safety_state="ANATOMY_FAILED",
@@ -191,7 +261,7 @@ class SafetyDecisionEngine:
                     human_review_required=True,
                     confidence_score=0.0,
                     clinical_action_allowed=False,
-                    reason_codes=sorted(list(set(reasons))),
+                    reason_codes=sorted(list(set(anatomy_reasons))),
                     mitigation_instructions=guidance,
                     audit_metadata=audit_meta,
                 )
@@ -213,14 +283,26 @@ class SafetyDecisionEngine:
         lat_mismatch = getattr(anatomy_res, "laterality_mismatch", False) if anatomy_res else False
         if not lat_mismatch and isinstance(anatomy_res, dict):
             lat_mismatch = anatomy_res.get("laterality_mismatch", False)
+
+        anat_req_conf = getattr(anatomy_res, "human_confirmation_required", False) if anatomy_res else False
+        if not anat_req_conf and isinstance(anatomy_res, dict):
+            anat_req_conf = anatomy_res.get("human_confirmation_required", False)
+
+        op_eye = getattr(anatomy_res, "operator_selected_eye", None) if not isinstance(anatomy_res, dict) else anatomy_res.get("operator_selected_eye")
+        inf_eye = getattr(anatomy_res, "inferred_laterality", None) if not isinstance(anatomy_res, dict) else anatomy_res.get("inferred_laterality")
+
         if lat_mismatch:
             reason_codes.append("LATERALITY_MISMATCH_SUSPECTED")
             eligibility = "REQUIRES_CONFIRMATION"
-            op_eye = getattr(anatomy_res, "operator_selected_eye", None) if not isinstance(anatomy_res, dict) else anatomy_res.get("operator_selected_eye")
-            inf_eye = getattr(anatomy_res, "inferred_laterality", None) if not isinstance(anatomy_res, dict) else anatomy_res.get("inferred_laterality")
             instructions.append(
                 f"Operator selected eye ({op_eye}) conflicts with detected anatomy "
                 f"({inf_eye}). Operator confirmation required."
+            )
+        elif anat_req_conf or (op_eye and inf_eye and inf_eye != "UNKNOWN" and op_eye != inf_eye):
+            reason_codes.append("LATERALITY_INDETERMINATE")
+            eligibility = "REQUIRES_CONFIRMATION"
+            instructions.append(
+                f"Retinal landmark laterality is indeterminate or requires confirmation (Operator={op_eye}, Inferred={inf_eye})."
             )
 
         # 2. Screen / Moiré Capture Warning (Advisory)
@@ -253,146 +335,132 @@ class SafetyDecisionEngine:
         # 5. Primary Model Output & Fallback Masking Prevention
         primary_conf = 0.0
         primary_stage = None
-        if primary_detection:
-            import math
-            raw_conf = primary_detection.get("confidence")
-            primary_stage = primary_detection.get("stage")
+        if primary_detection is None or not primary_detection:
+            return SafetyEvaluationResult(
+                screening_eligibility="INELIGIBLE",
+                safety_state="MODEL_FAILURE",
+                automation_level="UNABLE_TO_CLASSIFY",
+                human_review_required=True,
+                confidence_score=0.0,
+                clinical_action_allowed=False,
+                reason_codes=["MODEL_FAILURE", "MODEL_OUTPUT_INVALID", "MODEL_OUTPUT_MISSING_OR_EMPTY"],
+                mitigation_instructions="Primary AI prediction payload is missing or empty. Screening cannot proceed without inference.",
+                audit_metadata=audit_meta,
+            )
 
-            # Numerical stability / IEEE 754 check
-            try:
-                primary_conf = float(raw_conf) if raw_conf is not None else 0.0
-            except (ValueError, TypeError):
-                primary_conf = float('nan')
+        from engine.detector import validate_model_output_detailed
+        val_ok, val_err = validate_model_output_detailed(primary_detection)
 
-            if math.isnan(primary_conf) or math.isinf(primary_conf):
+        raw_conf = primary_detection.get("confidence")
+        primary_stage = primary_detection.get("stage")
+        try:
+            primary_conf = float(raw_conf) if raw_conf is not None else 0.0
+        except (ValueError, TypeError):
+            primary_conf = 0.0
+
+        if not val_ok:
+            if val_err == "PROBABILITY_DISTRIBUTION_UNNORMALIZED":
+                reason_codes.append("PROBABILITY_DISTRIBUTION_UNNORMALIZED")
+                instructions.append("Model output probabilities do not sum to 100%; calibration uncertain.")
+            else:
+                reasons = ["MODEL_OUTPUT_INVALID"]
+                if val_err:
+                    reasons.append(val_err)
+                target_state = "MODEL_FAILURE"
+                if val_err in ("NUMERICAL_INSTABILITY_DETECTED", "INVALID_STAGE_INDEX", "INVALID_STAGE_FORMAT"):
+                    target_state = "BLOCKED"
                 return SafetyEvaluationResult(
                     screening_eligibility="INELIGIBLE",
-                    safety_state="BLOCKED",
+                    safety_state=target_state,
+                    automation_level="UNABLE_TO_CLASSIFY",
+                    human_review_required=True,
+                    confidence_score=0.0 if target_state == "MODEL_FAILURE" else primary_conf,
+                    clinical_action_allowed=False,
+                    reason_codes=sorted(list(set(reasons))),
+                    mitigation_instructions=f"Model output validation failed: {val_err}. Fails safe to human review.",
+                    audit_metadata=audit_meta,
+                )
+
+        # Check if model failure without fallback
+        if primary_detection.get("model_available") is False or primary_detection.get("primary_failure") is True:
+            if not primary_detection.get("fallback_used"):
+                return SafetyEvaluationResult(
+                    screening_eligibility="INELIGIBLE",
+                    safety_state="MODEL_FAILURE",
                     automation_level="UNABLE_TO_CLASSIFY",
                     human_review_required=True,
                     confidence_score=0.0,
                     clinical_action_allowed=False,
-                    reason_codes=["NUMERICAL_INSTABILITY_DETECTED", "MODEL_OUTPUT_INVALID"],
-                    mitigation_instructions="Model inference produced non-finite numerical output (NaN/Inf). Retake or restart engine.",
+                    reason_codes=["MODEL_FAILURE"],
+                    mitigation_instructions="Primary AI inference failed to complete. No clinical prediction available.",
                     audit_metadata=audit_meta,
                 )
 
-            # Stage validity check
-            if primary_stage is not None:
-                try:
-                    int_stage = int(primary_stage)
-                    if int_stage not in (0, 1, 2, 3, 4):
-                        return SafetyEvaluationResult(
-                            screening_eligibility="INELIGIBLE",
-                            safety_state="BLOCKED",
-                            automation_level="UNABLE_TO_CLASSIFY",
-                            human_review_required=True,
-                            confidence_score=primary_conf,
-                            clinical_action_allowed=False,
-                            reason_codes=["INVALID_STAGE_INDEX", "MODEL_OUTPUT_INVALID"],
-                            mitigation_instructions=f"Model output invalid stage index ({primary_stage}).",
-                            audit_metadata=audit_meta,
-                        )
-                except (ValueError, TypeError):
-                    return SafetyEvaluationResult(
-                        screening_eligibility="INELIGIBLE",
-                        safety_state="BLOCKED",
-                        automation_level="UNABLE_TO_CLASSIFY",
-                        human_review_required=True,
-                        confidence_score=primary_conf,
-                        clinical_action_allowed=False,
-                        reason_codes=["INVALID_STAGE_FORMAT", "MODEL_OUTPUT_INVALID"],
-                        mitigation_instructions="Model stage is non-integer or malformed.",
-                        audit_metadata=audit_meta,
-                    )
+        # Check if deterministic fallback / mock is active
+        if (
+            primary_detection.get("_deterministic_fallback")
+            or primary_detection.get("model_available") is False
+            or primary_detection.get("fallback_used") is True
+        ):
+            reason_codes.append("MODEL_FALLBACK_ACTIVE")
+            instructions.append("Model fallback active: secondary or heuristic model in use. Requires physician review and sign-off.")
 
-            # Probability distribution sum sanity check
-            probs = primary_detection.get("all_probabilities")
-            if isinstance(probs, dict) and probs:
-                try:
-                    prob_vals = [float(v) for v in probs.values()]
-                    p_sum = sum(prob_vals)
-                    if p_sum > 2.0:
-                        if abs(p_sum - 100.0) > 10.0:
-                            reason_codes.append("PROBABILITY_DISTRIBUTION_UNNORMALIZED")
-                    else:
-                        if abs(p_sum - 1.0) > 0.10:
-                            reason_codes.append("PROBABILITY_DISTRIBUTION_UNNORMALIZED")
-                except Exception:
-                    pass
+        if primary_conf < self.thresholds["min_confidence"]:
+            reason_codes.append("LOW_CONFIDENCE")
+            instructions.append(
+                f"AI detection confidence ({primary_conf:.1f}%) is below minimum screening threshold "
+                f"({self.thresholds['min_confidence']}%)."
+            )
 
-            # Check if model failure without fallback
-            if primary_detection.get("model_available") is False or primary_detection.get("primary_failure") is True:
-                if not primary_detection.get("fallback_used"):
-                    return SafetyEvaluationResult(
-                        screening_eligibility="INELIGIBLE",
-                        safety_state="MODEL_FAILURE",
-                        automation_level="UNABLE_TO_CLASSIFY",
-                        human_review_required=True,
-                        confidence_score=0.0,
-                        clinical_action_allowed=False,
-                        reason_codes=["MODEL_FAILURE"],
-                        mitigation_instructions="Primary AI inference failed to complete. No clinical prediction available.",
-                        audit_metadata=audit_meta,
-                    )
+        # Referable disease requires human clinician sign-off
+        if primary_stage is not None and int(primary_stage) >= 2:
+            reason_codes.append("REFERABLE_DR_DETECTED")
+            instructions.append(f"Referable DR detected (Stage {primary_stage}); ophthalmology clinical review required.")
 
-            # Check if deterministic fallback / mock is active
-            if (
-                primary_detection.get("_deterministic_fallback")
-                or primary_detection.get("model_available") is False
-                or primary_detection.get("fallback_used") is True
-            ):
-                reason_codes.append("MODEL_FALLBACK_ACTIVE")
-                instructions.append("Model fallback active: secondary or heuristic model in use. Requires physician review and sign-off.")
-
-            if primary_conf < self.thresholds["min_confidence"]:
-                reason_codes.append("LOW_CONFIDENCE")
-                instructions.append(
-                    f"AI detection confidence ({primary_conf:.1f}%) is below minimum screening threshold "
-                    f"({self.thresholds['min_confidence']}%)."
-                )
-
-            # Referable disease requires human clinician sign-off
-            if primary_stage is not None and int(primary_stage) >= 2:
-                reason_codes.append("REFERABLE_DR_DETECTED")
-                instructions.append(f"Referable DR detected (Stage {primary_stage}); ophthalmology clinical review required.")
-
-            # Suspected non-DR pathology flag
-            if primary_detection.get("suspected_non_dr_pathology"):
-                reason_codes.append("NON_DR_PATHOLOGY_SUSPECTED")
-                instructions.append(
-                    "Possible non-diabetic retinal abnormality detected. "
-                    "DrishtiAI screening is limited to DR; specialist review required."
-                )
+        # Suspected non-DR pathology flag
+        if primary_detection.get("suspected_non_dr_pathology"):
+            reason_codes.append("NON_DR_PATHOLOGY_SUSPECTED")
+            instructions.append(
+                "Possible non-diabetic retinal abnormality detected. "
+                "DrishtiAI screening is limited to DR; specialist review required."
+            )
 
         # 6. Multi-Model Consensus / Disagreement
         if primary_detection and secondary_detection:
-            sec_stage = secondary_detection.get("stage")
-            if primary_stage is not None and sec_stage is not None:
-                stage_delta = abs(int(primary_stage) - int(sec_stage))
-                if stage_delta >= self.thresholds["model_disagreement_stage_delta"]:
-                    reason_codes.append("MODEL_DISAGREEMENT")
-                    instructions.append(
-                        f"Models disagree significantly: Primary model graded Stage {primary_stage}, "
-                        f"Secondary model graded Stage {sec_stage}."
-                    )
-                elif stage_delta == 1:
-                    # Check referable threshold boundary crossing (Stage < 2 vs Stage >= 2)
-                    is_prim_ref = int(primary_stage) >= 2
-                    is_sec_ref = int(sec_stage) >= 2
-                    if is_prim_ref != is_sec_ref:
-                        reason_codes.append("REFERABLE_BOUNDARY_DISAGREEMENT")
+            from engine.detector import validate_model_output_detailed
+            sec_ok, sec_err = validate_model_output_detailed(secondary_detection)
+            if not sec_ok:
+                reason_codes.append("SECONDARY_MODEL_OUTPUT_INVALID")
+                instructions.append(f"Secondary model validation failed ({sec_err}); consensus unavailable.")
+            else:
+                sec_stage = secondary_detection.get("stage")
+                if primary_stage is not None and sec_stage is not None:
+                    stage_delta = abs(int(primary_stage) - int(sec_stage))
+                    if stage_delta >= self.thresholds["model_disagreement_stage_delta"]:
+                        reason_codes.append("MODEL_DISAGREEMENT")
                         instructions.append(
-                            f"Models disagree across referable DR boundary (Stage {primary_stage} vs Stage {sec_stage})."
+                            f"Models disagree significantly: Primary model graded Stage {primary_stage}, "
+                            f"Secondary model graded Stage {sec_stage}."
                         )
+                    elif stage_delta == 1:
+                        # Check referable threshold boundary crossing (Stage < 2 vs Stage >= 2)
+                        is_prim_ref = int(primary_stage) >= 2
+                        is_sec_ref = int(sec_stage) >= 2
+                        if is_prim_ref != is_sec_ref:
+                            reason_codes.append("REFERABLE_BOUNDARY_DISAGREEMENT")
+                            instructions.append(
+                                f"Models disagree across referable DR boundary (Stage {primary_stage} vs Stage {sec_stage})."
+                            )
 
         # ── Final Safety State Resolution ──
         critical_reasons = {
             "MODEL_DISAGREEMENT",
             "REFERABLE_BOUNDARY_DISAGREEMENT",
+            "SECONDARY_MODEL_OUTPUT_INVALID",
             "LOW_CONFIDENCE",
             "OOD_SUSPECTED",
             "LATERALITY_MISMATCH_SUSPECTED",
+            "LATERALITY_INDETERMINATE",
             "MODEL_FALLBACK_ACTIVE",
             "QUALITY_BORDERLINE",
             "REFERABLE_DR_DETECTED",
