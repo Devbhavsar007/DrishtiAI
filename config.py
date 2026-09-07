@@ -43,7 +43,7 @@ def get_next_gemma_key():
 # ---------------------------------------------------------------------------
 # Flask Secret — cryptographically secure fallback
 # ---------------------------------------------------------------------------
-_env_secret = os.getenv("FLASK_SECRET_KEY", "")
+_env_secret = os.getenv("FLASK_SECRET_KEY") or os.getenv("FLASK_SECRET", "")
 _INSECURE_DEFAULTS = {"DrishtiAI-dev-key", "DrishtiAI-secret-key-change-me", "DrishtiAI-2026", ""}
 
 if _env_secret in _INSECURE_DEFAULTS:
@@ -53,6 +53,8 @@ else:
     FLASK_SECRET = _env_secret
 
 EDGE_DEVICE_SECRET = os.getenv("EDGE_DEVICE_SECRET", FLASK_SECRET)
+ADMIN_SECRET = os.getenv("ADMIN_SECRET", "drishti-admin-secret-2026")
+DOCTOR_SECRET = os.getenv("DOCTOR_SECRET", "drishti-doctor-secret-2026")
 
 # ---------------------------------------------------------------------------
 # Model Paths
@@ -75,6 +77,12 @@ PIPELINE_CALIBRATION = os.path.join(MODELS_DIR, "dr_pipeline", "calibration.json
 # App Settings
 # ---------------------------------------------------------------------------
 DEBUG = os.getenv("FLASK_DEBUG", "true").lower() == "true"
+
+# Rate Limiting & Distributed Worker Storage
+RATELIMIT_STORAGE_URI = os.getenv("RATELIMIT_STORAGE_URI") or os.getenv("REDIS_URL", "memory://")
+
+# CORS Origin Whitelist
+CORS_ALLOWED_ORIGINS = [o.strip() for o in os.getenv("CORS_ALLOWED_ORIGINS", "").split(",") if o.strip()]
 
 # Image settings
 IMG_SIZE = 64    # Tanwar-12 model expects 64x64

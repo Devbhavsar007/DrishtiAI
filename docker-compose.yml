@@ -10,6 +10,7 @@ services:
     ports:
       - "5000:5000"
     environment:
+      - FLASK_SECRET_KEY=sih2026-production-drishtiai-key
       - FLASK_SECRET=sih2026-production-drishtiai-key
       - OFFLINE_MODE=True
       - DEBUG=False

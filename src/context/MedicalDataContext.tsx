@@ -241,7 +241,7 @@ export const MedicalDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
   const analyzeScan = useCallback(
     async (
       patient: Patient,
-      input: { file?: File; preset?: PresetFundusCase }
+      input: { file?: File; preset?: PresetFundusCase; eye?: 'OD' | 'OS'; demoScenario?: any }
     ): Promise<ScanAnalysis> => {
       const today = new Date().toISOString().split('T')[0];
 
@@ -256,8 +256,35 @@ export const MedicalDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
           formData.append('sugar_level', String(patient.sugar_level));
           formData.append('hba1c', String(patient.hba1c));
 
+          // Ensure valid Bearer token for Zero-Trust RBAC
+          let token = localStorage.getItem('drishti_auth_token');
+          if (!token) {
+            try {
+              const authRes = await fetch(`${backendUrl}/api/auth/login`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ role: 'HEALTH_WORKER', user_id: 'operator-web' }),
+              });
+              if (authRes.ok) {
+                const authData = await authRes.json();
+                if (authData.token) {
+                  token = authData.token;
+                  localStorage.setItem('drishti_auth_token', token);
+                }
+              }
+            } catch {
+              // Proceed with attempt
+            }
+          }
+
+          const headers: Record<string, string> = {};
+          if (token) {
+            headers['Authorization'] = `Bearer ${token}`;
+          }
+
           const res = await fetch(`${backendUrl}/analyze`, {
             method: 'POST',
+            headers,
             body: formData,
           });
 

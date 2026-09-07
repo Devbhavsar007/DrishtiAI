@@ -56,10 +56,13 @@ def decide_referral(
         human_review_required = True
         reason_codes.append("DOCTOR_REVIEW_PENDING")
 
+    codes = sorted(set(reason_codes))
     return {
         "priority": priority,
-        "reasonCodes": sorted(set(reason_codes)),
+        "reasonCodes": codes,
+        "reason_codes": codes,
         "humanReviewRequired": human_review_required,
+        "human_review_required": human_review_required,
         "disclaimer": (
             "Referral priority is a screening-support policy outcome and does not "
             "replace clinical diagnosis."

@@ -6,6 +6,7 @@ from .auth import (
     verify_token,
     require_role,
     get_current_actor,
+    verify_role_credentials,
 )
 
 __all__ = [
@@ -14,4 +15,5 @@ __all__ = [
     "verify_token",
     "require_role",
     "get_current_actor",
+    "verify_role_credentials",
 ]

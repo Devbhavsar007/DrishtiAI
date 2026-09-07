@@ -4,6 +4,7 @@ import unittest
 import time
 import uuid
 from app import app
+from config import DOCTOR_SECRET
 from engine.security.auth import Role, create_access_token, verify_token
 from database import create_patient, delete_patient, save_scan, get_db
 
@@ -60,8 +61,12 @@ class TestRBACAndObservability(unittest.TestCase):
     def test_auth_login_and_me_endpoints(self):
         client = app.test_client()
 
-        # Login as Doctor
-        res = client.post("/api/auth/login", json={"user_id": "dr-sharma", "role": "DOCTOR"})
+        # Unauthenticated Doctor role elevation attempt -> 401
+        res_unauth = client.post("/api/auth/login", json={"user_id": "dr-sharma", "role": "DOCTOR"})
+        self.assertEqual(res_unauth.status_code, 401)
+
+        # Login as Doctor with valid secret -> 200
+        res = client.post("/api/auth/login", json={"user_id": "dr-sharma", "role": "DOCTOR", "secret": DOCTOR_SECRET})
         self.assertEqual(res.status_code, 200)
         data = res.get_json()
         self.assertTrue(data["success"])

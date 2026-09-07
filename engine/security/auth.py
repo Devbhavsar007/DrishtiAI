@@ -186,3 +186,17 @@ def require_role(*allowed_roles: str | Role) -> Callable:
             return fn(*args, **kwargs)
         return wrapper
     return decorator
+
+
+def verify_role_credentials(role: str, secret: str | None) -> bool:
+    """
+    Verify credentials for privileged roles (ADMIN, DOCTOR) to prevent self-elevation.
+    HEALTH_WORKER and PATIENT do not require master secrets to request tokens.
+    """
+    from config import ADMIN_SECRET, DOCTOR_SECRET
+    role_clean = role.upper()
+    if role_clean == Role.ADMIN.value:
+        return bool(secret and hmac.compare_digest(str(secret), ADMIN_SECRET))
+    if role_clean == Role.DOCTOR.value:
+        return bool(secret and hmac.compare_digest(str(secret), DOCTOR_SECRET))
+    return True

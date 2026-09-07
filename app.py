@@ -43,7 +43,13 @@ from engine.clinical.progression import assess_progression_risk
 from engine.clinical.referral import decide_referral
 from engine.clinical.safety import evaluate_safety
 from engine.clinical.rag import MedicalRAGRetriever
-from engine.security.auth import Role, create_access_token, require_role, get_current_actor
+from engine.security.auth import (
+    Role,
+    create_access_token,
+    require_role,
+    get_current_actor,
+    verify_role_credentials,
+)
 
 # Import database
 from database import (
@@ -55,13 +61,25 @@ from database import (
     get_pending_sync_events, create_or_update_screening_session,
     get_screening_session, update_screening_session_state, get_db
 )
-from engine.safety.state_machine import ScreeningState, ScreeningStateMachine
+from engine.safety.state_machine import (
+    ScreeningState,
+    ScreeningStateMachine,
+    InvalidStateTransitionError,
+)
 from engine.safety import SafetyDecisionEngine, validate_image_file, assess_anatomy_and_laterality, evaluate_ood_signal
 
 safety_engine = SafetyDecisionEngine()
 rag_retriever = MedicalRAGRetriever()
 
-from config import FLASK_SECRET, DEBUG, OFFLINE_MODE, UPLOAD_DIR, RESULTS_DIR
+from config import (
+    FLASK_SECRET,
+    DEBUG,
+    OFFLINE_MODE,
+    UPLOAD_DIR,
+    RESULTS_DIR,
+    RATELIMIT_STORAGE_URI,
+    CORS_ALLOWED_ORIGINS,
+)
 
 # ---------------------------------------------------------------------------
 # Flask app
@@ -71,34 +89,41 @@ app.secret_key = FLASK_SECRET
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16 MB upload limit
 
 # ---------------------------------------------------------------------------
-# CORS — allow localhost, Vercel deployments, and production frontends
+# CORS — restricted strictly to localhost, project-scoped Vercel domains, and configured origins
 # ---------------------------------------------------------------------------
 cors_origins = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
     "http://localhost:5000",
     "http://127.0.0.1:5000",
-    re.compile(r"^https:\/\/.*\.vercel\.app$"),
+    re.compile(r"^https:\/\/(?:drishtiai[a-z0-9-]*|optigemma[a-z0-9-]*)\.vercel\.app$"),
 ]
+cors_origins.extend(CORS_ALLOWED_ORIGINS)
 frontend_url = os.getenv("FRONTEND_URL")
-if frontend_url:
+if frontend_url and frontend_url not in cors_origins:
     cors_origins.append(frontend_url)
 
 CORS(app, origins=cors_origins, supports_credentials=True)
 
 # ---------------------------------------------------------------------------
-# Rate Limiting
+# Rate Limiting (Memory fallback, Redis-backed in production)
 # ---------------------------------------------------------------------------
 limiter = Limiter(
     get_remote_address,
     app=app,
     default_limits=["60 per minute"],
-    storage_uri="memory://",
+    storage_uri=RATELIMIT_STORAGE_URI,
 )
 
 # ---------------------------------------------------------------------------
-# Security Headers Middleware
+# Request Correlation & Security Headers Middleware
 # ---------------------------------------------------------------------------
+@app.before_request
+def assign_request_id():
+    """Correlate each HTTP request with an audit-traceable Request ID."""
+    g.request_id = request.headers.get("X-Request-ID") or f"req-{uuid.uuid4().hex[:12]}"
+
+
 @app.after_request
 def inject_security_headers(response):
     """Inject strict security headers into every HTTP response."""
@@ -106,7 +131,15 @@ def inject_security_headers(response):
     response.headers['X-Frame-Options'] = 'SAMEORIGIN'
     response.headers['X-XSS-Protection'] = '1; mode=block'
     response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
-    response.headers['Permissions-Policy'] = 'camera=(), microphone=(), geolocation=()'
+    response.headers['Permissions-Policy'] = 'camera=(self), microphone=(self), geolocation=()'
+    if hasattr(g, "request_id"):
+        response.headers['X-Request-ID'] = g.request_id
+
+    # Anti-caching for Protected Health Information (PHI)
+    if request.path.startswith(("/api/", "/results/")):
+        response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, private'
+        response.headers['Pragma'] = 'no-cache'
+
     if not DEBUG:
         response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
         response.headers['Content-Security-Policy'] = (
@@ -217,14 +250,16 @@ def api_health_detailed():
 # ========================================
 
 @app.route("/api/sessions/bind", methods=["POST"])
+@require_role(Role.HEALTH_WORKER, Role.DOCTOR, Role.ADMIN)
 def api_sessions_bind():
     """
     Establish four-way binding: (patient_id, operator_id, eye, session_id).
-    Prevents wrong-patient or wrong-eye mix-ups.
+    Prevents wrong-patient or wrong-eye mix-ups. Actor identity is enforced from JWT credentials.
     """
     data = request.get_json() or {}
     patient_id = data.get("patient_id")
-    operator_id = data.get("operator_id", "operator-1")
+    # Bind actor identity strictly to authenticated user to prevent identity spoofing
+    operator_id = g.current_user["actor_id"] if hasattr(g, "current_user") and g.current_user else "operator-1"
     eye = (data.get("eye") or "OD").strip().upper()
 
     if not patient_id:
@@ -257,6 +292,7 @@ def api_sessions_bind():
 
 
 @app.route("/api/sessions/<session_id>", methods=["GET"])
+@require_role(Role.HEALTH_WORKER, Role.DOCTOR, Role.ADMIN)
 def api_sessions_get(session_id):
     """Get status of an active screening session."""
     sess = get_screening_session(session_id)
@@ -266,6 +302,7 @@ def api_sessions_get(session_id):
 
 
 @app.route("/api/sessions/<session_id>/confirm", methods=["POST"])
+@require_role(Role.HEALTH_WORKER, Role.DOCTOR, Role.ADMIN)
 def api_sessions_confirm(session_id):
     """Operator signs off or confirms laterality override for a session."""
     sess = get_screening_session(session_id)
@@ -274,14 +311,17 @@ def api_sessions_confirm(session_id):
 
     data = request.get_json() or {}
     notes = data.get("notes", "Operator confirmed laterality and clinical review.")
-    actor_id = data.get("operator_id", sess.get("operator_id", "operator-1"))
+    actor_id = g.current_user["actor_id"] if hasattr(g, "current_user") and g.current_user else sess.get("operator_id", "operator-1")
 
-    update_screening_session_state(
-        session_id=session_id,
-        new_state=ScreeningState.ANATOMY_VALIDATED,
-        actor_id=actor_id,
-        reason=notes,
-    )
+    try:
+        update_screening_session_state(
+            session_id=session_id,
+            new_state=ScreeningState.ANATOMY_VALIDATED,
+            actor_id=actor_id,
+            reason=notes,
+        )
+    except InvalidStateTransitionError as te:
+        return jsonify({"error": str(te)}), 409
 
     return jsonify({
         "success": True,
@@ -292,6 +332,7 @@ def api_sessions_confirm(session_id):
 
 
 @app.route("/api/ingest/validate", methods=["POST"])
+@require_role(Role.HEALTH_WORKER, Role.DOCTOR, Role.ADMIN)
 def api_ingest_validate():
     """
     Pre-inference image validation endpoint.
@@ -382,6 +423,15 @@ def serve_result(filename):
         return jsonify({"success": False, "error": "Access denied: invalid file path."}), 403
     if not os.path.isfile(safe_path):
         return jsonify({"success": False, "error": "File not found."}), 404
+
+    # IDOR protection: patient can only view their own scan artifacts
+    if hasattr(g, "current_user") and g.current_user and g.current_user.get("actor_role") == Role.PATIENT.value:
+        caller_id = g.current_user.get("actor_id")
+        scan_id = safe_filename.split("_")[0]
+        scan = get_scan(scan_id)
+        if scan and scan.get("patient_id") != caller_id:
+            return jsonify({"success": False, "error": "Access denied: patient cannot access other patient records."}), 403
+
     return send_from_directory(RESULTS_DIR, safe_filename)
 
 
@@ -445,11 +495,15 @@ def api_patients_create():
 
 
 @app.route("/api/patients/<patient_id>", methods=["GET"])
-@require_role(Role.HEALTH_WORKER, Role.DOCTOR, Role.ADMIN)
+@require_role(Role.HEALTH_WORKER, Role.DOCTOR, Role.ADMIN, Role.PATIENT)
 def api_patient_detail(patient_id):
     """Get patient details with scan history."""
     try:
         _validate_pid(patient_id)
+        if hasattr(g, "current_user") and g.current_user and g.current_user.get("actor_role") == Role.PATIENT.value:
+            if g.current_user.get("actor_id") != patient_id:
+                return jsonify({"success": False, "error": "Access denied: patient cannot access other patient records."}), 403
+
         patient = get_patient(patient_id)
         if not patient:
             return jsonify({"success": False, "error": "Patient not found."}), 404
@@ -499,13 +553,16 @@ def api_patient_delete(patient_id):
 # ========================================
 
 @app.route("/api/scans/<scan_id>", methods=["GET"])
-@require_role(Role.HEALTH_WORKER, Role.DOCTOR, Role.ADMIN)
+@require_role(Role.HEALTH_WORKER, Role.DOCTOR, Role.ADMIN, Role.PATIENT)
 def api_scan_detail(scan_id):
     """Get a single scan's full details."""
     try:
         scan = get_scan(scan_id)
         if not scan:
             return jsonify({"success": False, "error": "Scan not found."}), 404
+        if hasattr(g, "current_user") and g.current_user and g.current_user.get("actor_role") == Role.PATIENT.value:
+            if scan.get("patient_id") != g.current_user.get("actor_id"):
+                return jsonify({"success": False, "error": "Access denied: patient cannot access other patient records."}), 403
         return jsonify({"success": True, "scan": scan})
     except Exception as e:
         log.exception("Scan detail error")
@@ -634,10 +691,15 @@ def api_scan_triage(scan_id):
 
 
 @app.route("/api/patients/<patient_id>/timeline", methods=["GET"])
-@require_role(Role.HEALTH_WORKER, Role.DOCTOR, Role.ADMIN)
+@require_role(Role.HEALTH_WORKER, Role.DOCTOR, Role.ADMIN, Role.PATIENT)
 def api_patient_timeline(patient_id):
     """Retrieve chronological longitudinal timeline for a patient."""
     try:
+        _validate_pid(patient_id)
+        if hasattr(g, "current_user") and g.current_user and g.current_user.get("actor_role") == Role.PATIENT.value:
+            if g.current_user.get("actor_id") != patient_id:
+                return jsonify({"success": False, "error": "Access denied: patient cannot access other patient records."}), 403
+
         timeline = get_patient_timeline(patient_id)
         return jsonify({"success": True, "timeline": timeline})
     except ValueError as ve:
@@ -735,7 +797,9 @@ def api_scan_doctor_review(scan_id):
         payload = request.get_json(silent=True) or {}
         # Zero-trust: Sourced from verified authenticated actor, never trusted blindly from client payload
         actor = getattr(g, "current_user", {})
-        actor_id = actor.get("actor_id", "DOC-ONLINE")
+        actor_id = actor.get("actor_id")
+        if not actor_id:
+            return jsonify({"success": False, "error": "No verified clinician identity present."}), 401
 
         client_doc_id = payload.get("doctor_id")
         if client_doc_id and client_doc_id != actor_id and actor.get("actor_role") != Role.ADMIN.value:
@@ -744,7 +808,7 @@ def api_scan_doctor_review(scan_id):
                 "error": f"Identity mismatch: Authenticated clinician '{actor_id}' cannot sign off as '{client_doc_id}'."
             }), 403
 
-        doctor_id = client_doc_id or actor_id
+        doctor_id = client_doc_id if (client_doc_id and actor.get("actor_role") == Role.ADMIN.value) else actor_id
         doctor_name = payload.get("doctor_name") or f"Dr. {actor_id}"
         decision = payload.get("decision") or "APPROVED"  # APPROVED | MODIFIED | REJECTED_RETAKE
         original_stage = int(scan.get("stage", 0))
@@ -805,7 +869,7 @@ def api_get_doctor_review(scan_id):
 
 @app.route("/api/auth/login", methods=["POST"])
 def api_auth_login():
-    """Generate session access token for DrishtiAI roles."""
+    """Generate session access token for DrishtiAI roles with credential verification for privileged tiers."""
     data = request.get_json(silent=True) or {}
     user_id = data.get("user_id", "").strip() or f"user-{uuid.uuid4().hex[:6]}"
     requested_role = str(data.get("role") or Role.HEALTH_WORKER.value).upper()
@@ -815,6 +879,14 @@ def api_auth_login():
             "success": False,
             "error": f"Invalid role: {requested_role}. Valid roles are: {sorted(list(valid_roles))}"
         }), 400
+
+    secret = data.get("secret") or data.get("password") or request.headers.get("X-Drishti-Secret")
+    if requested_role in (Role.ADMIN.value, Role.DOCTOR.value):
+        if not verify_role_credentials(requested_role, secret):
+            return jsonify({
+                "success": False,
+                "error": f"Privileged role '{requested_role}' requires valid secret credentials. Direct self-elevation is prohibited."
+            }), 401
 
     token = create_access_token(user_id=user_id, role=requested_role)
     return jsonify({
@@ -998,13 +1070,14 @@ def analyze():
         detection_result = predict(model_input_enhanced_highres)
 
         # --- 4. Centralized Safety Arbitration ---
+        verified_operator = (g.current_user.get("actor_id") if hasattr(g, "current_user") and g.current_user else request.form.get("operator_id") or "operator-1")
         safety_eval = safety_engine.evaluate(
             image_val=val_result,
             anatomy_res=anatomy_res,
             ood_res=ood_res,
             primary_detection=detection_result,
             patient_id=patient_id,
-            operator_id=request.form.get("operator_id"),
+            operator_id=verified_operator,
         )
 
         # --- 5. Generate Heatmap ---
@@ -1343,13 +1416,14 @@ def analyze_v2():
                 log.warning("Failed to save scan to DB: %s", db_err)
 
         # ── Centralized Safety Arbitration ──
+        verified_operator = (g.current_user.get("actor_id") if hasattr(g, "current_user") and g.current_user else request.form.get("operator_id") or "operator-1")
         safety_eval = safety_engine.evaluate(
             image_val=val_result,
             anatomy_res=anatomy_res,
             ood_res=ood_res,
             primary_detection=detection_result,
             patient_id=patient_id,
-            operator_id=request.form.get("operator_id"),
+            operator_id=verified_operator,
         )
 
         # ── Compile v2 response ──
@@ -1501,13 +1575,14 @@ def analyze_v3():
         result["patient_id"] = patient_id
 
         # Centralized Safety Arbitration
+        verified_operator = (g.current_user.get("actor_id") if hasattr(g, "current_user") and g.current_user else request.form.get("operator_id") or "operator-1")
         safety_eval = safety_engine.evaluate(
             image_val=val_result,
             anatomy_res=anatomy_res,
             ood_res=ood_res,
             primary_detection=result.get("detection"),
             patient_id=patient_id,
-            operator_id=request.form.get("operator_id"),
+            operator_id=verified_operator,
         )
         result["safety"] = safety_eval.to_dict()
         result["safety_state"] = safety_eval.safety_state

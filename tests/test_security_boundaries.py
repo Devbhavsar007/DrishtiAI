@@ -33,6 +33,8 @@ class TestSecurityBoundaries(unittest.TestCase):
             notes="Testing security controls",
         )
         cls.patient_id = cls.patient["id"]
+        cls.hw_token = create_access_token("op-priya", Role.HEALTH_WORKER.value)
+        cls.hw_headers = {"Authorization": f"Bearer {cls.hw_token}"}
 
     @classmethod
     def tearDownClass(cls):
@@ -76,22 +78,28 @@ class TestSecurityBoundaries(unittest.TestCase):
         self.assertIn("total_patients", data["diagnostics"])
 
     def test_03_session_binding_validation(self):
-        """Session binding must enforce valid patient and standard eye laterality."""
+        """Session binding must enforce valid patient, standard eye laterality, and authenticated role."""
+        # 0. Unauthenticated request -> 401
+        res_unauth = self.client.post("/api/sessions/bind", json={"patient_id": self.patient_id, "eye": "OD"})
+        self.assertEqual(res_unauth.status_code, 401)
+
         # A. Missing patient_id -> 400
-        res_no_pid = self.client.post("/api/sessions/bind", json={"eye": "OD"})
+        res_no_pid = self.client.post("/api/sessions/bind", json={"eye": "OD"}, headers=self.hw_headers)
         self.assertEqual(res_no_pid.status_code, 400)
 
         # B. Invalid eye laterality -> 400
         res_bad_eye = self.client.post(
             "/api/sessions/bind",
-            json={"patient_id": self.patient_id, "eye": "THIRD_EYE"}
+            json={"patient_id": self.patient_id, "eye": "THIRD_EYE"},
+            headers=self.hw_headers
         )
         self.assertEqual(res_bad_eye.status_code, 400)
 
         # C. Nonexistent patient -> 404
         res_no_pat = self.client.post(
             "/api/sessions/bind",
-            json={"patient_id": "P-9999", "eye": "OD"}
+            json={"patient_id": "P-9999", "eye": "OD"},
+            headers=self.hw_headers
         )
         self.assertEqual(res_no_pat.status_code, 404)
 
@@ -100,9 +108,9 @@ class TestSecurityBoundaries(unittest.TestCase):
             "/api/sessions/bind",
             json={
                 "patient_id": self.patient_id,
-                "operator_id": "op-priya",
                 "eye": "OS",
-            }
+            },
+            headers=self.hw_headers
         )
         self.assertEqual(res_valid.status_code, 201)
         bind_data = res_valid.get_json()
@@ -110,25 +118,35 @@ class TestSecurityBoundaries(unittest.TestCase):
         self.assertIn("session_id", bind_data)
         self.assertEqual(bind_data["eye"], "OS")
         self.assertEqual(bind_data["state"], "CREATED")
+        self.assertEqual(bind_data["operator_id"], "op-priya")
 
         self.session_id = bind_data["session_id"]
 
     def test_04_operator_confirmation_gate(self):
-        """Operator can confirm and override warnings for a session."""
+        """Operator can confirm and override warnings for a session with role authorization."""
         # Ensure session exists
         res_valid = self.client.post(
             "/api/sessions/bind",
             json={
                 "patient_id": self.patient_id,
-                "operator_id": "op-priya",
                 "eye": "OS",
-            }
+            },
+            headers=self.hw_headers
         )
         session_id = res_valid.get_json()["session_id"]
 
+        # Unauthenticated confirmation -> 401
+        res_unauth_confirm = self.client.post(
+            f"/api/sessions/{session_id}/confirm",
+            json={"notes": "No auth"}
+        )
+        self.assertEqual(res_unauth_confirm.status_code, 401)
+
+        # Authenticated confirmation -> 200
         res_confirm = self.client.post(
             f"/api/sessions/{session_id}/confirm",
-            json={"notes": "Operator verified pupil dilation and patient identity."}
+            json={"notes": "Operator verified pupil dilation and patient identity."},
+            headers=self.hw_headers
         )
         self.assertEqual(res_confirm.status_code, 200)
         data = res_confirm.get_json()

@@ -31,12 +31,16 @@ class ScreeningState:
     RECAPTURE_REQUESTED = "RECAPTURE_REQUESTED"
     ANATOMY_VALIDATED = "ANATOMY_VALIDATED"
     ANATOMY_FAILED = "ANATOMY_FAILED"
+    LATERALITY_CONFLICT = "LATERALITY_CONFLICT"
     OPERATOR_OVERRIDE_PENDING = "OPERATOR_OVERRIDE_PENDING"
+    SCREENING_PENDING = "SCREENING_PENDING"
     SCREENING_RUNNING = "SCREENING_RUNNING"
     SCREENING_COMPLETED = "SCREENING_COMPLETED"
     SCREENING_UNCERTAIN = "SCREENING_UNCERTAIN"
+    MODEL_FAILURE = "MODEL_FAILURE"
     OOD_REVIEW = "OOD_REVIEW"
     RISK_ASSESSED = "RISK_ASSESSED"
+    REFERRAL_PENDING = "REFERRAL_PENDING"
     DOCTOR_REVIEW = "DOCTOR_REVIEW"
     FINALIZED = "FINALIZED"
     SYNC_PENDING = "SYNC_PENDING"
@@ -51,11 +55,14 @@ class ScreeningState:
 ALLOWED_TRANSITIONS: Dict[str, set[str]] = {
     ScreeningState.CREATED: {
         ScreeningState.CAPTURED,
+        ScreeningState.ANATOMY_VALIDATED,  # Direct operator pre-validation
         ScreeningState.CANCELLED,
     },
     ScreeningState.CAPTURED: {
         ScreeningState.VALIDATING_IMAGE,
+        ScreeningState.QUALITY_PASSED,
         ScreeningState.QUALITY_FAILED,
+        ScreeningState.ANATOMY_VALIDATED,
         ScreeningState.RECOVERY_REQUIRED,
         ScreeningState.CANCELLED,
     },
@@ -64,11 +71,14 @@ ALLOWED_TRANSITIONS: Dict[str, set[str]] = {
         ScreeningState.QUALITY_FAILED,
         ScreeningState.ANATOMY_VALIDATED,
         ScreeningState.ANATOMY_FAILED,
+        ScreeningState.LATERALITY_CONFLICT,
         ScreeningState.CANCELLED,
     },
     ScreeningState.QUALITY_PASSED: {
         ScreeningState.ANATOMY_VALIDATED,
         ScreeningState.ANATOMY_FAILED,
+        ScreeningState.LATERALITY_CONFLICT,
+        ScreeningState.SCREENING_PENDING,
         ScreeningState.SCREENING_RUNNING,
         ScreeningState.CANCELLED,
     },
@@ -81,11 +91,19 @@ ALLOWED_TRANSITIONS: Dict[str, set[str]] = {
         ScreeningState.CANCELLED,
     },
     ScreeningState.ANATOMY_VALIDATED: {
+        ScreeningState.SCREENING_PENDING,
         ScreeningState.SCREENING_RUNNING,
         ScreeningState.CANCELLED,
     },
     ScreeningState.ANATOMY_FAILED: {
         ScreeningState.OPERATOR_OVERRIDE_PENDING,
+        ScreeningState.LATERALITY_CONFLICT,
+        ScreeningState.RECAPTURE_REQUESTED,
+        ScreeningState.CANCELLED,
+    },
+    ScreeningState.LATERALITY_CONFLICT: {
+        ScreeningState.OPERATOR_OVERRIDE_PENDING,
+        ScreeningState.ANATOMY_VALIDATED,
         ScreeningState.RECAPTURE_REQUESTED,
         ScreeningState.CANCELLED,
     },
@@ -94,21 +112,34 @@ ALLOWED_TRANSITIONS: Dict[str, set[str]] = {
         ScreeningState.RECAPTURE_REQUESTED,
         ScreeningState.CANCELLED,
     },
+    ScreeningState.SCREENING_PENDING: {
+        ScreeningState.SCREENING_RUNNING,
+        ScreeningState.CANCELLED,
+    },
     ScreeningState.SCREENING_RUNNING: {
         ScreeningState.SCREENING_COMPLETED,
         ScreeningState.SCREENING_UNCERTAIN,
+        ScreeningState.MODEL_FAILURE,
         ScreeningState.OOD_REVIEW,
         ScreeningState.RECOVERY_REQUIRED,
         ScreeningState.CANCELLED,
     },
+    ScreeningState.MODEL_FAILURE: {
+        ScreeningState.RECOVERY_REQUIRED,
+        ScreeningState.SCREENING_UNCERTAIN,
+        ScreeningState.DOCTOR_REVIEW,
+        ScreeningState.CANCELLED,
+    },
     ScreeningState.SCREENING_COMPLETED: {
         ScreeningState.RISK_ASSESSED,
+        ScreeningState.REFERRAL_PENDING,
         ScreeningState.DOCTOR_REVIEW,
         ScreeningState.FINALIZED,
     },
     ScreeningState.SCREENING_UNCERTAIN: {
         ScreeningState.DOCTOR_REVIEW,
         ScreeningState.OOD_REVIEW,
+        ScreeningState.REFERRAL_PENDING,
         ScreeningState.RISK_ASSESSED,
     },
     ScreeningState.OOD_REVIEW: {
@@ -117,8 +148,14 @@ ALLOWED_TRANSITIONS: Dict[str, set[str]] = {
         ScreeningState.CANCELLED,
     },
     ScreeningState.RISK_ASSESSED: {
+        ScreeningState.REFERRAL_PENDING,
         ScreeningState.DOCTOR_REVIEW,
         ScreeningState.FINALIZED,
+    },
+    ScreeningState.REFERRAL_PENDING: {
+        ScreeningState.DOCTOR_REVIEW,
+        ScreeningState.FINALIZED,
+        ScreeningState.CANCELLED,
     },
     ScreeningState.DOCTOR_REVIEW: {
         ScreeningState.FINALIZED,

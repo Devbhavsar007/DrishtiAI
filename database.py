@@ -9,6 +9,7 @@ import re
 import json
 import logging
 import uuid
+import threading
 from contextlib import contextmanager
 from datetime import datetime
 from typing import Any
@@ -16,6 +17,7 @@ from typing import Any
 log = logging.getLogger("DrishtiAI.db")
 
 DB_PATH = os.path.join(os.path.dirname(__file__), 'DrishtiAI.db')
+_patient_id_lock = threading.Lock()
 
 # ---------------------------------------------------------------------------
 # Validation helpers
@@ -101,6 +103,9 @@ def init_db():
                 action TEXT NOT NULL,
                 entity_type TEXT NOT NULL,
                 entity_id TEXT NOT NULL,
+                actor_id TEXT DEFAULT 'system',
+                actor_role TEXT DEFAULT 'SYSTEM',
+                request_id TEXT DEFAULT '',
                 details TEXT DEFAULT '',
                 created_at TEXT DEFAULT (datetime('now'))
             );
@@ -150,17 +155,6 @@ def init_db():
                 FOREIGN KEY (patient_id) REFERENCES patients(id)
             );
 
-            CREATE TABLE IF NOT EXISTS audit_log (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                action TEXT NOT NULL,
-                entity_type TEXT NOT NULL,
-                entity_id TEXT NOT NULL,
-                actor_id TEXT DEFAULT 'system',
-                actor_role TEXT DEFAULT 'SYSTEM',
-                details TEXT DEFAULT '',
-                created_at TEXT DEFAULT (datetime('now'))
-            );
-
             CREATE TABLE IF NOT EXISTS sync_events (
                 id TEXT PRIMARY KEY,
                 device_id TEXT NOT NULL,
@@ -189,7 +183,7 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_sync_entity ON sync_events(entity_type, entity_id);
         """)
         # Backward compatibility column migrations for existing SQLite file
-        for col_def in ["actor_id TEXT DEFAULT 'system'", "actor_role TEXT DEFAULT 'SYSTEM'"]:
+        for col_def in ["actor_id TEXT DEFAULT 'system'", "actor_role TEXT DEFAULT 'SYSTEM'", "request_id TEXT DEFAULT ''"]:
             try:
                 conn.execute(f"ALTER TABLE audit_log ADD COLUMN {col_def}")
             except sqlite3.OperationalError:
@@ -267,22 +261,38 @@ def init_db():
             VALUES (2, 'Screening sessions, safety metadata, and sync ledger columns');
         """)
 
+        # Migration v3: Audit log request_id correlation and unified schema
+        conn.execute("""
+            INSERT OR IGNORE INTO schema_migrations (version, description)
+            VALUES (3, 'Audit log request_id correlation and unified schema');
+        """)
+
         conn.commit()
     log.info("Database initialized at %s", DB_PATH)
 
 
-def _audit(conn, action: str, entity_type: str, entity_id: str, details: str = "", actor_id: str = "system", actor_role: str = "SYSTEM"):
-    """Record an audit trail entry with actor provenance."""
+def _audit(conn, action: str, entity_type: str, entity_id: str, details: str = "", actor_id: str = "system", actor_role: str = "SYSTEM", request_id: str = ""):
+    """Record an audit trail entry with actor provenance and request correlation."""
+    try:
+        from flask import g, has_request_context
+        if has_request_context():
+            if not request_id and hasattr(g, "request_id"):
+                request_id = str(g.request_id)
+            if actor_id == "system" and hasattr(g, "current_user") and g.current_user:
+                actor_id = g.current_user.get("actor_id", "system")
+                actor_role = g.current_user.get("actor_role", "SYSTEM")
+    except Exception:
+        pass
     conn.execute(
-        "INSERT INTO audit_log (action, entity_type, entity_id, actor_id, actor_role, details) VALUES (?, ?, ?, ?, ?, ?)",
-        (action, entity_type, entity_id, _sanitize_string(actor_id, 100), _sanitize_string(actor_role, 50), _sanitize_string(details, 2000))
+        "INSERT INTO audit_log (action, entity_type, entity_id, actor_id, actor_role, request_id, details) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (action, entity_type, entity_id, _sanitize_string(actor_id, 100), _sanitize_string(actor_role, 50), _sanitize_string(request_id, 100), _sanitize_string(details, 2000))
     )
 
 
-def log_audit_event(action: str, entity_type: str, entity_id: str, details: str = "", actor_id: str = "system", actor_role: str = "SYSTEM"):
+def log_audit_event(action: str, entity_type: str, entity_id: str, details: str = "", actor_id: str = "system", actor_role: str = "SYSTEM", request_id: str = ""):
     """Public wrapper to record audit log events."""
     with get_db() as conn:
-        _audit(conn, action, entity_type, entity_id, details, actor_id, actor_role)
+        _audit(conn, action, entity_type, entity_id, details, actor_id, actor_role, request_id)
         conn.commit()
 
 
@@ -337,9 +347,31 @@ def get_screening_session(session_id: str):
         return d
 
 
-def update_screening_session_state(session_id: str, new_state: str, actor_id: str = "operator-1", reason: str = ""):
-    """Update state of an existing screening session."""
+def update_screening_session_state(
+    session_id: str,
+    new_state: str,
+    actor_id: str = "operator-1",
+    reason: str = "",
+    validate_transition: bool = True,
+):
+    """Update state of an existing screening session with lifecycle enforcement."""
     with get_db() as conn:
+        row = conn.execute("SELECT current_state FROM screening_sessions WHERE session_id = ?", (session_id,)).fetchone()
+        if row and validate_transition:
+            current_state = row["current_state"]
+            if current_state and current_state != new_state:
+                from engine.safety.state_machine import ALLOWED_TRANSITIONS, InvalidStateTransitionError
+                allowed = ALLOWED_TRANSITIONS.get(current_state, set())
+                # Clinically allow doctor sign-off/finalize/cancel from active states
+                is_doctor_override = (
+                    new_state in ("FINALIZED", "CANCELLED") and
+                    (actor_id.startswith("dr-") or "doctor" in actor_id.lower() or "doc" in actor_id.lower())
+                )
+                if new_state not in allowed and not is_doctor_override:
+                    raise InvalidStateTransitionError(
+                        f"Illegal state transition from {current_state} to {new_state} by {actor_id}"
+                    )
+
         conn.execute(
             "UPDATE screening_sessions SET current_state = ?, updated_at = datetime('now') WHERE session_id = ?",
             (new_state, session_id)
@@ -349,20 +381,21 @@ def update_screening_session_state(session_id: str, new_state: str, actor_id: st
 
 
 def generate_patient_id():
-    """Generate a monotonically increasing unique patient ID like P-0001, immune to deletions."""
-    with get_db() as conn:
-        row = conn.execute("""
-            SELECT COALESCE(MAX(CAST(SUBSTR(id, 3) AS INTEGER)), 0) AS max_id 
-            FROM patients 
-            WHERE id LIKE 'P-%'
-        """).fetchone()
-        next_num = (row["max_id"] if row else 0) + 1
-        while True:
-            candidate = f"P-{next_num:04d}"
-            exists = conn.execute("SELECT 1 FROM patients WHERE id = ?", (candidate,)).fetchone()
-            if not exists:
-                return candidate
-            next_num += 1
+    """Generate a monotonically increasing unique patient ID like P-0001, immune to deletions and concurrent race conditions."""
+    with _patient_id_lock:
+        with get_db() as conn:
+            row = conn.execute("""
+                SELECT COALESCE(MAX(CAST(SUBSTR(id, 3) AS INTEGER)), 0) AS max_id 
+                FROM patients 
+                WHERE id LIKE 'P-%'
+            """).fetchone()
+            next_num = (row["max_id"] if row else 0) + 1
+            while True:
+                candidate = f"P-{next_num:04d}"
+                exists = conn.execute("SELECT 1 FROM patients WHERE id = ?", (candidate,)).fetchone()
+                if not exists:
+                    return candidate
+                next_num += 1
 
 
 # === Patient CRUD & Input Validation ===
@@ -414,32 +447,33 @@ def create_patient(name, age=None, gender='', diabetes_duration=None,
         raise ValueError("Patient name cannot be empty.")
     validate_patient_metrics(age=age, diabetes_duration=diabetes_duration, sugar_level=sugar_level, hba1c=hba1c)
 
-    with get_db() as conn:
-        for attempt in range(10):
-            row = conn.execute("""
-                SELECT COALESCE(MAX(CAST(SUBSTR(id, 3) AS INTEGER)), 0) AS max_id 
-                FROM patients 
-                WHERE id LIKE 'P-%'
-            """).fetchone()
-            next_num = (row["max_id"] if row else 0) + 1 + attempt
-            pid = f"P-{next_num:04d}"
-            try:
-                conn.execute(
-                    """INSERT INTO patients (id, name, age, gender, diabetes_duration,
-                       sugar_level, hba1c, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (pid, _sanitize_string(name), age, _sanitize_string(gender, 50),
-                     diabetes_duration, sugar_level, hba1c, _sanitize_string(notes))
-                )
-                _audit(conn, "CREATE", "patient", pid, f"name={name}")
-                conn.commit()
-                patient = conn.execute("SELECT * FROM patients WHERE id = ?", (pid,)).fetchone()
-                return dict(patient)
-            except sqlite3.IntegrityError:
-                continue
-            except Exception as e:
-                conn.rollback()
-                raise e
-        raise RuntimeError("Failed to allocate a unique patient ID after 10 attempts.")
+    with _patient_id_lock:
+        with get_db() as conn:
+            for attempt in range(10):
+                row = conn.execute("""
+                    SELECT COALESCE(MAX(CAST(SUBSTR(id, 3) AS INTEGER)), 0) AS max_id 
+                    FROM patients 
+                    WHERE id LIKE 'P-%'
+                """).fetchone()
+                next_num = (row["max_id"] if row else 0) + 1 + attempt
+                pid = f"P-{next_num:04d}"
+                try:
+                    conn.execute(
+                        """INSERT INTO patients (id, name, age, gender, diabetes_duration,
+                           sugar_level, hba1c, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (pid, _sanitize_string(name), age, _sanitize_string(gender, 50),
+                         diabetes_duration, sugar_level, hba1c, _sanitize_string(notes))
+                    )
+                    _audit(conn, "CREATE", "patient", pid, f"name={name}")
+                    conn.commit()
+                    patient = conn.execute("SELECT * FROM patients WHERE id = ?", (pid,)).fetchone()
+                    return dict(patient)
+                except sqlite3.IntegrityError:
+                    continue
+                except Exception as e:
+                    conn.rollback()
+                    raise e
+            raise RuntimeError("Failed to allocate a unique patient ID after 10 attempts.")
 
 
 def get_patient(patient_id):

@@ -47,17 +47,14 @@ def evaluate_safety(
         quality_assessment=qa,
     )
 
-    # Reconcile legacy reason codes for contract parity
+    # Reconcile legacy reason codes for contract parity while preserving canonical strings
     reasons = list(result.reason_codes)
-    if "LOW_CONFIDENCE" in reasons:
-        reasons.remove("LOW_CONFIDENCE")
-        reasons.append("LOW_MODEL_CONFIDENCE")
-    if "MODEL_DISAGREEMENT" in reasons:
-        reasons.remove("MODEL_DISAGREEMENT")
-        reasons.append("MODEL_DISAGREEMENT_SIGNIFICANT")
-    if "REFERABLE_DR_DETECTED" in reasons:
-        reasons.remove("REFERABLE_DR_DETECTED")
-        reasons.append("REFERABLE_GRADE_VERIFICATION")
+    if "LOW_CONFIDENCE" in reasons or "LOW_MODEL_CONFIDENCE" in reasons:
+        reasons.extend(["LOW_CONFIDENCE", "LOW_MODEL_CONFIDENCE"])
+    if "MODEL_DISAGREEMENT" in reasons or "MODEL_DISAGREEMENT_SIGNIFICANT" in reasons:
+        reasons.extend(["MODEL_DISAGREEMENT", "MODEL_DISAGREEMENT_SIGNIFICANT"])
+    if "REFERABLE_DR_DETECTED" in reasons or "REFERABLE_GRADE_VERIFICATION" in reasons:
+        reasons.extend(["REFERABLE_DR_DETECTED", "REFERABLE_GRADE_VERIFICATION"])
     if not reasons and result.safety_state == "VERIFIED":
         reasons.append("SCREENING_VALID")
 
