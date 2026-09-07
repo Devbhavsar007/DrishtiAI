@@ -58,7 +58,8 @@ data/heimed/validation_report.json
 data/aptos/
 
 # === Sample Data (auto-generated) ===
-sample_data/
+sample_data/*
+!sample_data/test_fundus.jpg
 
 # === IDE / Editor ===
 .vscode/

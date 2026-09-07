@@ -12,7 +12,7 @@ Tests defensive boundaries against:
 
 import io
 import os
-import pytest
+import unittest
 from PIL import Image
 import numpy as np
 
@@ -22,15 +22,6 @@ from engine.safety.anatomy import assess_anatomy_and_laterality, AnatomyResult
 from app import app
 from engine.security.auth import create_access_token, Role
 import database
-
-
-@pytest.fixture
-def client():
-    app.config["TESTING"] = True
-    with app.test_client() as c:
-        token = create_access_token("test-hw", Role.HEALTH_WORKER.value)
-        c.environ_base["HTTP_AUTHORIZATION"] = f"Bearer {token}"
-        yield c
 
 
 def _create_test_image(width=512, height=512, color=(180, 50, 20), format="JPEG"):
@@ -46,7 +37,7 @@ def _create_test_image(width=512, height=512, color=(180, 50, 20), format="JPEG"
     return buf.getvalue()
 
 
-class TestImageValidatorRedTeam:
+class TestImageValidatorRedTeam(unittest.TestCase):
     """Adversarial image payload injection tests."""
 
     def test_corrupted_bytes_injection(self):
@@ -54,31 +45,30 @@ class TestImageValidatorRedTeam:
         validator = ImageValidator()
         junk_bytes = b"NOT_AN_IMAGE_HEADER" + os.urandom(2048)
         result = validator.validate_bytes(junk_bytes)
-        assert not result.is_valid
-        assert result.rejection_reason in ("UNSUPPORTED_FORMAT", "CORRUPTED_IMAGE")
-        assert len(result.errors) > 0
+        self.assertFalse(result.is_valid)
+        self.assertIn(result.rejection_reason, ("UNSUPPORTED_FORMAT", "CORRUPTED_IMAGE"))
+        self.assertGreater(len(result.errors), 0)
 
     def test_truncated_header_injection(self):
         """Image with truncated header (partial JPEG) must fail gracefully."""
         validator = ImageValidator()
         partial_jpeg = b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00"
         result = validator.validate_bytes(partial_jpeg)
-        assert not result.is_valid
-        assert result.rejection_reason in ("CORRUPTED_IMAGE", "UNSUPPORTED_FORMAT")
+        self.assertFalse(result.is_valid)
+        self.assertIn(result.rejection_reason, ("CORRUPTED_IMAGE", "UNSUPPORTED_FORMAT"))
 
     def test_decompression_bomb_dimension_limit(self):
         """Images exceeding 25 megapixels (e.g. 6000x5000 = 30MP) must be rejected."""
         validator = ImageValidator(max_megapixels=25.0)
         # Create an image header with massive dimensions
-        # Pillow allows creating image in memory
         large_img = Image.new("RGB", (6000, 5000), color=(100, 100, 100))
         buf = io.BytesIO()
         large_img.save(buf, format="JPEG", quality=20)
         large_bytes = buf.getvalue()
 
         result = validator.validate_bytes(large_bytes)
-        assert not result.is_valid
-        assert result.rejection_reason in ("DIMENSIONS_EXCEED_LIMIT", "DECOMPRESSION_BOMB_RISK")
+        self.assertFalse(result.is_valid)
+        self.assertIn(result.rejection_reason, ("DIMENSIONS_EXCEED_LIMIT", "DECOMPRESSION_BOMB_RISK"))
 
     def test_blank_black_image_injection(self):
         """Completely black or flat uniform images must be rejected as uninformative."""
@@ -89,8 +79,8 @@ class TestImageValidatorRedTeam:
         flat_bytes = buf.getvalue()
 
         result = validator.validate_bytes(flat_bytes)
-        assert not result.is_valid
-        assert result.rejection_reason == "BLANK_OR_UNINFORMATIVE"
+        self.assertFalse(result.is_valid)
+        self.assertEqual(result.rejection_reason, "BLANK_OR_UNINFORMATIVE")
 
     def test_duplicate_sha256_detection(self):
         """Presenting identical image bytes twice must detect duplicate hash."""
@@ -99,101 +89,104 @@ class TestImageValidatorRedTeam:
         
         # First submission
         res1 = validator.validate_bytes(valid_bytes)
-        assert res1.is_valid
-        assert not res1.duplicate_detected
-        assert res1.sha256_hash != ""
+        self.assertTrue(res1.is_valid)
+        self.assertFalse(res1.duplicate_detected)
+        self.assertNotEqual(res1.sha256_hash, "")
 
         # Second submission of identical bytes
         res2 = validator.validate_bytes(valid_bytes)
-        assert res2.is_valid
-        assert res2.duplicate_detected
-        assert res2.sha256_hash == res1.sha256_hash
+        self.assertTrue(res2.is_valid)
+        self.assertTrue(res2.duplicate_detected)
+        self.assertEqual(res2.sha256_hash, res1.sha256_hash)
 
 
-class TestOutOfDistributionRedTeam:
+class TestOutOfDistributionRedTeam(unittest.TestCase):
     """Out-of-distribution artifact handling tests."""
 
     def test_non_fundus_domain_invalid(self):
         """Evaluating a non-fundus picture (e.g. skin rash or doc) flags domain shift."""
-        # Create a non-fundus image (e.g. blue/white document-like image)
         img = Image.new("RGB", (300, 300), color=(240, 240, 255))
         arr = np.array(img)
-        # In fundus, red channel dominates strongly; here blue dominates
         ood_res = evaluate_ood_signal(arr)
-        # Should flag OOD heuristic shift or domain invalid
-        assert not ood_res.domain_valid or ood_res.is_ood_suspected or ood_res.level_triggered > 0
+        self.assertTrue(not ood_res.domain_valid or ood_res.is_ood_suspected or ood_res.level_triggered > 0)
 
 
-class TestEndpointFailureBoundaries:
+class TestEndpointFailureBoundaries(unittest.TestCase):
     """HTTP API error handling on malformed or malicious requests."""
 
-    def test_ingest_validate_with_corrupt_payload(self, client):
+    def setUp(self):
+        app.config["TESTING"] = True
+        self.client = app.test_client()
+        token = create_access_token("test-hw", Role.HEALTH_WORKER.value)
+        self.client.environ_base["HTTP_AUTHORIZATION"] = f"Bearer {token}"
+
+    def test_ingest_validate_with_corrupt_payload(self):
         """POST /api/ingest/validate with corrupted file returns 400."""
         data = {
             "image": (io.BytesIO(b"MALICIOUS_GARBAGE_BYTES_12345"), "attack.jpg")
         }
-        res = client.post("/api/ingest/validate", data=data, content_type="multipart/form-data")
-        assert res.status_code == 400
+        res = self.client.post("/api/ingest/validate", data=data, content_type="multipart/form-data")
+        self.assertEqual(res.status_code, 400)
         json_data = res.get_json()
-        assert not json_data["is_valid"]
-        assert "errors" in json_data
+        self.assertFalse(json_data["is_valid"])
+        self.assertIn("errors", json_data)
 
-    def test_session_confirm_nonexistent(self, client):
+    def test_session_confirm_nonexistent(self):
         """POST /api/sessions/<invalid_id>/confirm returns 404."""
-        res = client.post(
+        res = self.client.post(
             "/api/sessions/SES-DOES-NOT-EXIST/confirm",
             json={"operator_id": "OP-99", "confirmed_eye": "OD"},
         )
-        assert res.status_code == 404
+        self.assertEqual(res.status_code, 404)
         data = res.get_json()
-        assert "error" in data
+        self.assertIn("error", data)
 
-    def test_demo_run_invalid_scenario(self, client):
+    def test_demo_run_invalid_scenario(self):
         """POST /api/demo/run with nonexistent scenario returns 400."""
-        res = client.post("/api/demo/run", json={"scenario_id": "NON_EXISTENT_SCENARIO_XYZ"})
-        assert res.status_code == 400
+        res = self.client.post("/api/demo/run", json={"scenario_id": "NON_EXISTENT_SCENARIO_XYZ"})
+        self.assertEqual(res.status_code, 400)
         data = res.get_json()
-        assert "error" in data
+        self.assertIn("error", data)
 
-    def test_analyze_rejects_corrupted_payload(self, client):
+    def test_analyze_rejects_corrupted_payload(self):
         """POST /analyze rejects corrupted bytes with 400 and safety_state REJECTED."""
         data = {"image": (io.BytesIO(b"MALICIOUS_GARBAGE_BYTES_CORRUPT"), "exploit.png")}
-        res = client.post("/analyze", data=data, content_type="multipart/form-data")
-        assert res.status_code == 400
+        res = self.client.post("/analyze", data=data, content_type="multipart/form-data")
+        self.assertEqual(res.status_code, 400)
         json_data = res.get_json()
-        assert json_data["safety_state"] == "REJECTED"
-        assert json_data["clinical_action_allowed"] is False
+        self.assertEqual(json_data["safety_state"], "REJECTED")
+        self.assertFalse(json_data["clinical_action_allowed"])
 
-    def test_analyze_v2_rejects_corrupted_payload(self, client):
+    def test_analyze_v2_rejects_corrupted_payload(self):
         """POST /api/analyze-v2 rejects corrupted bytes with 400."""
         data = {"image": (io.BytesIO(b"MALICIOUS_GARBAGE_BYTES_CORRUPT"), "exploit.png")}
-        res = client.post("/api/analyze-v2", data=data, content_type="multipart/form-data")
-        assert res.status_code == 400
+        res = self.client.post("/api/analyze-v2", data=data, content_type="multipart/form-data")
+        self.assertEqual(res.status_code, 400)
         json_data = res.get_json()
-        assert json_data["safety_state"] == "REJECTED"
+        self.assertEqual(json_data["safety_state"], "REJECTED")
 
-    def test_analyze_v3_rejects_corrupted_payload(self, client):
+    def test_analyze_v3_rejects_corrupted_payload(self):
         """POST /api/analyze-v3 rejects corrupted bytes with 400."""
         data = {"image": (io.BytesIO(b"MALICIOUS_GARBAGE_BYTES_CORRUPT"), "exploit.png")}
-        res = client.post("/api/analyze-v3", data=data, content_type="multipart/form-data")
-        assert res.status_code == 400
+        res = self.client.post("/api/analyze-v3", data=data, content_type="multipart/form-data")
+        self.assertEqual(res.status_code, 400)
         json_data = res.get_json()
-        assert json_data["safety_state"] == "REJECTED"
+        self.assertEqual(json_data["safety_state"], "REJECTED")
 
-    def test_analyze_rejects_non_fundus_payload(self, client):
+    def test_analyze_rejects_non_fundus_payload(self):
         """POST /analyze rejects non-fundus image (e.g. flat blue document) with 400."""
         blue_img = Image.new("RGB", (300, 300), color=(10, 50, 240))
         buf = io.BytesIO()
         blue_img.save(buf, format="JPEG")
         data = {"image": (io.BytesIO(buf.getvalue()), "non_fundus.jpg")}
-        res = client.post("/analyze", data=data, content_type="multipart/form-data")
-        assert res.status_code == 400
+        res = self.client.post("/analyze", data=data, content_type="multipart/form-data")
+        self.assertEqual(res.status_code, 400)
         json_data = res.get_json()
-        assert json_data["safety_state"] == "REJECTED"
-        assert json_data["screening_eligibility"] == "INELIGIBLE"
+        self.assertEqual(json_data["safety_state"], "REJECTED")
+        self.assertEqual(json_data["screening_eligibility"], "INELIGIBLE")
 
 
-class TestDatabaseIntegrityAndSyncRedTeam:
+class TestDatabaseIntegrityAndSyncRedTeam(unittest.TestCase):
     """Database concurrency, deletion tolerance, and offline sync reconciliation tests."""
 
     def test_patient_id_monotonicity_after_deletions(self):
@@ -208,8 +201,8 @@ class TestDatabaseIntegrityAndSyncRedTeam:
         
         # Create patient C — should not collide with p2
         p3 = database.create_patient("Temp Patient 3", age=55)
-        assert p3["id"] != p2["id"]
-        assert p3["id"] != p1["id"]
+        self.assertNotEqual(p3["id"], p2["id"])
+        self.assertNotEqual(p3["id"], p1["id"])
 
     def test_sync_reconciliation_conflict_requires_review(self):
         """Incoming sync batch with stale version generates CONFLICT_REQUIRES_REVIEW."""
@@ -235,8 +228,8 @@ class TestDatabaseIntegrityAndSyncRedTeam:
         }]
 
         result = database.reconcile_sync_batch(incoming)
-        assert result["conflict_count"] == 1
-        assert test_entity_id in result["conflict_ids"]
+        self.assertEqual(result["conflict_count"], 1)
+        self.assertIn(test_entity_id, result["conflict_ids"])
 
         # Verify DB status is CONFLICT_REQUIRES_REVIEW
         with database.get_db() as conn:
@@ -244,8 +237,8 @@ class TestDatabaseIntegrityAndSyncRedTeam:
                 "SELECT sync_status FROM sync_events WHERE entity_id = ? AND version = 3",
                 (test_entity_id,)
             ).fetchone()
-            assert row is not None
-            assert row["sync_status"] == "CONFLICT_REQUIRES_REVIEW"
+            self.assertIsNotNone(row)
+            self.assertEqual(row["sync_status"], "CONFLICT_REQUIRES_REVIEW")
 
     def test_sync_reconciliation_applies_clean_update(self):
         """Incoming sync batch with clean version updates the patient entity in the database."""
@@ -261,28 +254,25 @@ class TestDatabaseIntegrityAndSyncRedTeam:
         }]
 
         result = database.reconcile_sync_batch(incoming)
-        assert result["synced_count"] == 1
-        assert test_entity_id in result["synced_ids"]
+        self.assertEqual(result["synced_count"], 1)
+        self.assertIn(test_entity_id, result["synced_ids"])
 
         # Verify patient exists in patients table
         patient = database.get_patient(test_entity_id)
-        assert patient is not None
-        assert patient["name"] == "Synced Verified Patient"
-        assert patient["age"] == 62
+        self.assertIsNotNone(patient)
+        self.assertEqual(patient["name"], "Synced Verified Patient")
+        self.assertEqual(patient["age"], 62)
 
 
-class TestSafetyArbitrationAndLaterality:
+class TestSafetyArbitrationAndLaterality(unittest.TestCase):
     """Centralized safety arbitration logic and clinical invariant verification."""
 
     def test_laterality_mismatch_never_reports_consistent(self):
         """When operator eye and inferred eye disagree, notes must NEVER say consistent."""
-        from engine.safety.anatomy import assess_anatomy_and_laterality
-        # Synthetic test image
         img = np.zeros((400, 400, 3), dtype=np.uint8)
-        # Force a laterality check with mismatch
         res = assess_anatomy_and_laterality(img, operator_eye="OD")
         for note in res.notes:
-            assert "Laterality consistent: Operator=OD, Inferred=OS" not in note
+            self.assertNotIn("Laterality consistent: Operator=OD, Inferred=OS", note)
 
     def test_central_safety_engine_blocks_clinical_action_on_uncertain(self):
         """When safety_state is UNCERTAIN or REJECTED, clinical_action_allowed must be False."""
@@ -295,7 +285,10 @@ class TestSafetyArbitrationAndLaterality:
         low_conf_det = {"stage": 2, "confidence": 45.0}
 
         res = engine.evaluate(image_val=val, primary_detection=low_conf_det)
-        assert res.safety_state == "UNCERTAIN"
-        assert res.human_review_required is True
-        assert res.clinical_action_allowed is False
+        self.assertEqual(res.safety_state, "UNCERTAIN")
+        self.assertTrue(res.human_review_required)
+        self.assertFalse(res.clinical_action_allowed)
 
+
+if __name__ == "__main__":
+    unittest.main()

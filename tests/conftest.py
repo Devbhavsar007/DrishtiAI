@@ -12,7 +12,10 @@ REPO_ROOT = str(Path(__file__).resolve().parent.parent)
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
-import pytest
+try:
+    import pytest
+except ImportError:
+    pytest = None
 
 # Force test environment defaults before any torch/CUDA import
 os.environ["CUDA_VISIBLE_DEVICES"] = "-1"

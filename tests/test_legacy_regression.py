@@ -38,7 +38,23 @@ class TestLegacyEndpointsRegression(unittest.TestCase):
             "test_fundus.jpg"
         )
         if not os.path.exists(cls.test_image_path):
-            raise FileNotFoundError(f"Test image not found at {cls.test_image_path}")
+            os.makedirs(os.path.dirname(cls.test_image_path), exist_ok=True)
+            img = np.zeros((600, 600, 3), dtype=np.uint8)
+            cv2.circle(img, (300, 300), 250, (20, 40, 80), -1)
+            cv2.circle(img, (300, 300), 248, (30, 70, 140), -1)
+            cv2.circle(img, (380, 300), 40, (60, 130, 200), -1)
+            cv2.circle(img, (380, 300), 35, (80, 160, 230), -1)
+            cv2.circle(img, (260, 300), 30, (15, 35, 70), -1)
+            np.random.seed(42)
+            for _ in range(30):
+                angle = np.random.uniform(0, 2 * np.pi)
+                length = np.random.randint(80, 200)
+                x2 = int(380 + length * np.cos(angle))
+                y2 = int(300 + length * np.sin(angle))
+                cv2.line(img, (380, 300), (x2, y2), (10, 20, 50), np.random.randint(1, 4))
+            for _ in range(8):
+                cv2.circle(img, (np.random.randint(150, 450), np.random.randint(150, 450)), np.random.randint(2, 5), (40, 50, 170), -1)
+            cv2.imwrite(cls.test_image_path, img)
         with open(cls.test_image_path, "rb") as f:
             cls.test_image_bytes = f.read()
 
