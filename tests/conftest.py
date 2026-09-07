@@ -4,6 +4,14 @@ Forces fast deterministic offline CPU execution across all test fixtures.
 """
 
 import os
+import sys
+from pathlib import Path
+
+# Ensure repo root is on sys.path
+REPO_ROOT = str(Path(__file__).resolve().parent.parent)
+if REPO_ROOT not in sys.path:
+    sys.path.insert(0, REPO_ROOT)
+
 import pytest
 
 # Force test environment defaults before any torch/CUDA import

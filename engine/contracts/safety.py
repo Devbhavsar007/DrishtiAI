@@ -14,6 +14,10 @@ class SafetyDecision:
     reasons: list[str] = field(default_factory=list)
     human_review_required: bool = False
     retake_guidance: str | None = None
+    safety_state: str = "VERIFIED"  # "VERIFIED" | "UNCERTAIN" | "BLOCKED" | "REJECTED"
+    automation_level: str = "AUTOMATED_ASSISTANCE"  # "AUTOMATED_ASSISTANCE" | "HUMAN_REVIEW_REQUIRED" | "HUMAN_CONFIRMED" | "UNABLE_TO_CLASSIFY"
+    clinical_action_allowed: bool = False
+    screening_eligibility: str = "ELIGIBLE"  # "ELIGIBLE" | "INELIGIBLE" | "REQUIRES_CONFIRMATION"
     disclaimer: str = (
         "DrishtiAI is an assistive screening platform and clinical decision support system. "
         "It does NOT provide a definitive diagnosis. Clinical oversight by an ophthalmologist is required."

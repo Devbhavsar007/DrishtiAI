@@ -348,33 +348,53 @@ def update_screening_session_state(session_id: str, new_state: str, actor_id: st
 
 
 def generate_patient_id():
-    """Generate a unique patient ID like P-0001."""
+    """Generate a monotonically increasing unique patient ID like P-0001, immune to deletions."""
     with get_db() as conn:
-        row = conn.execute("SELECT COUNT(*) as cnt FROM patients").fetchone()
-    return f"P-{row['cnt'] + 1:04d}"
+        row = conn.execute("""
+            SELECT COALESCE(MAX(CAST(SUBSTR(id, 3) AS INTEGER)), 0) AS max_id 
+            FROM patients 
+            WHERE id LIKE 'P-%'
+        """).fetchone()
+        next_num = (row["max_id"] if row else 0) + 1
+        while True:
+            candidate = f"P-{next_num:04d}"
+            exists = conn.execute("SELECT 1 FROM patients WHERE id = ?", (candidate,)).fetchone()
+            if not exists:
+                return candidate
+            next_num += 1
 
 
 # === Patient CRUD ===
 
 def create_patient(name, age=None, gender='', diabetes_duration=None,
                    sugar_level=None, hba1c=None, notes=''):
-    """Create a new patient record."""
-    pid = generate_patient_id()
+    """Create a new patient record with collision-proof atomic allocation."""
     with get_db() as conn:
-        try:
-            conn.execute(
-                """INSERT INTO patients (id, name, age, gender, diabetes_duration,
-                   sugar_level, hba1c, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                (pid, _sanitize_string(name), age, _sanitize_string(gender, 50),
-                 diabetes_duration, sugar_level, hba1c, _sanitize_string(notes))
-            )
-            _audit(conn, "CREATE", "patient", pid, f"name={name}")
-            conn.commit()
-            patient = conn.execute("SELECT * FROM patients WHERE id = ?", (pid,)).fetchone()
-            return dict(patient)
-        except Exception as e:
-            conn.rollback()
-            raise e
+        for attempt in range(10):
+            row = conn.execute("""
+                SELECT COALESCE(MAX(CAST(SUBSTR(id, 3) AS INTEGER)), 0) AS max_id 
+                FROM patients 
+                WHERE id LIKE 'P-%'
+            """).fetchone()
+            next_num = (row["max_id"] if row else 0) + 1 + attempt
+            pid = f"P-{next_num:04d}"
+            try:
+                conn.execute(
+                    """INSERT INTO patients (id, name, age, gender, diabetes_duration,
+                       sugar_level, hba1c, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (pid, _sanitize_string(name), age, _sanitize_string(gender, 50),
+                     diabetes_duration, sugar_level, hba1c, _sanitize_string(notes))
+                )
+                _audit(conn, "CREATE", "patient", pid, f"name={name}")
+                conn.commit()
+                patient = conn.execute("SELECT * FROM patients WHERE id = ?", (pid,)).fetchone()
+                return dict(patient)
+            except sqlite3.IntegrityError:
+                continue
+            except Exception as e:
+                conn.rollback()
+                raise e
+        raise RuntimeError("Failed to allocate a unique patient ID after 10 attempts.")
 
 
 def get_patient(patient_id):
@@ -882,7 +902,9 @@ def get_pending_sync_events(device_id: str | None = None, limit: int = 100) -> l
 def reconcile_sync_batch(incoming_events: list[dict]) -> dict:
     """
     Reconcile an incoming batch of sync events from an edge device.
-    Follows Last-Write-Wins with explicit conflict logging rather than silent overwrite.
+    Follows deterministic version-based arbitration:
+    - If local version is newer: status is CONFLICT_REQUIRES_REVIEW, preserves local version.
+    - If incoming version >= local version: status is SYNCED and changes are transactionally applied.
     """
     synced_ids = []
     conflict_ids = []
@@ -891,7 +913,7 @@ def reconcile_sync_batch(incoming_events: list[dict]) -> dict:
         for evt in incoming_events:
             event_id = evt.get("id") or f"sync-{uuid.uuid4().hex[:12]}"
             device_id = evt.get("device_id", "unknown-edge")
-            entity_type = evt.get("entity_type", "unknown")
+            entity_type = str(evt.get("entity_type", "unknown")).lower()
             entity_id = evt.get("entity_id", "")
             action = str(evt.get("action", "UPDATE")).upper()
             payload = evt.get("payload") or {}
@@ -904,22 +926,71 @@ def reconcile_sync_batch(incoming_events: list[dict]) -> dict:
             ).fetchone()
 
             if existing and existing["version"] > incoming_version:
-                # Conflict detected: local version is newer
+                # Conflict detected: local version is strictly newer
                 conn.execute(
                     """INSERT OR REPLACE INTO sync_events
-                       (id, device_id, entity_type, entity_id, action, version, payload, sync_status, conflict_resolution, synced_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, 'CONFLICT', 'Retained local newer version', datetime('now'))""",
+                       (id, device_id, entity_type, entity_id, action, version, payload, sync_status, conflict_resolution, conflict_type, synced_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, 'CONFLICT_REQUIRES_REVIEW', 'Retained local newer version', 'VERSION_SKEW', datetime('now'))""",
                     (event_id, device_id, entity_type, entity_id, action, incoming_version, json.dumps(payload))
                 )
                 conflict_ids.append(entity_id)
             else:
-                # Clean apply
+                # Clean apply to ledger
                 conn.execute(
                     """INSERT OR REPLACE INTO sync_events
                        (id, device_id, entity_type, entity_id, action, version, payload, sync_status, synced_at)
                        VALUES (?, ?, ?, ?, ?, ?, ?, 'SYNCED', datetime('now'))""",
                     (event_id, device_id, entity_type, entity_id, action, incoming_version, json.dumps(payload))
                 )
+
+                # Transactionally apply entity state to canonical tables if payload provided
+                if isinstance(payload, dict) and payload and entity_id:
+                    if entity_type == "patient":
+                        p_exists = conn.execute("SELECT id FROM patients WHERE id = ?", (entity_id,)).fetchone()
+                        if p_exists:
+                            for col in _ALLOWED_PATIENT_COLS:
+                                if col in payload and payload[col] is not None:
+                                    conn.execute(
+                                        f"UPDATE patients SET {col} = ?, updated_at = datetime('now') WHERE id = ?",
+                                        (_sanitize_string(str(payload[col])) if isinstance(payload[col], str) else payload[col], entity_id)
+                                    )
+                        else:
+                            name = payload.get("name", "Unknown Synced Patient")
+                            conn.execute(
+                                """INSERT INTO patients (id, name, age, gender, diabetes_duration, sugar_level, hba1c, notes)
+                                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                                (entity_id, _sanitize_string(name), payload.get("age"), _sanitize_string(payload.get("gender", ""), 50),
+                                 payload.get("diabetes_duration"), payload.get("sugar_level"), payload.get("hba1c"),
+                                 _sanitize_string(payload.get("notes", "")))
+                            )
+                    elif entity_type == "doctor_review":
+                        conn.execute(
+                            """INSERT INTO doctor_reviews (
+                                id, scan_id, patient_id, doctor_id, doctor_name, decision,
+                                original_stage, adjusted_stage, approved_priority, clinical_notes, recommended_intervention
+                               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                               ON CONFLICT(id) DO UPDATE SET
+                                 decision = excluded.decision,
+                                 adjusted_stage = excluded.adjusted_stage,
+                                 approved_priority = excluded.approved_priority,
+                                 clinical_notes = excluded.clinical_notes,
+                                 recommended_intervention = excluded.recommended_intervention
+                            """,
+                            (
+                                entity_id,
+                                payload.get("scan_id", ""),
+                                payload.get("patient_id", ""),
+                                payload.get("doctor_id", "unknown-doc"),
+                                payload.get("doctor_name", ""),
+                                payload.get("decision", "APPROVED"),
+                                int(payload.get("original_stage", 0)),
+                                payload.get("adjusted_stage"),
+                                payload.get("approved_priority", "ROUTINE"),
+                                payload.get("clinical_notes", ""),
+                                payload.get("recommended_intervention", "")
+                            )
+                        )
+
                 synced_ids.append(entity_id)
 
         conn.commit()
@@ -938,7 +1009,7 @@ def get_sync_status() -> dict:
     with get_db() as conn:
         pending = conn.execute("SELECT COUNT(*) as cnt FROM sync_events WHERE sync_status = 'PENDING'").fetchone()["cnt"]
         synced = conn.execute("SELECT COUNT(*) as cnt FROM sync_events WHERE sync_status = 'SYNCED'").fetchone()["cnt"]
-        conflicts = conn.execute("SELECT COUNT(*) as cnt FROM sync_events WHERE sync_status = 'CONFLICT'").fetchone()["cnt"]
+        conflicts = conn.execute("SELECT COUNT(*) as cnt FROM sync_events WHERE sync_status IN ('CONFLICT', 'CONFLICT_REQUIRES_REVIEW')").fetchone()["cnt"]
     return {
         "pending_events": pending,
         "synced_events": synced,

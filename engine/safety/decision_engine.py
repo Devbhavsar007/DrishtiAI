@@ -33,6 +33,7 @@ class SafetyEvaluationResult:
     automation_level: str               # "AUTOMATED_ASSISTANCE", "HUMAN_REVIEW_REQUIRED", "HUMAN_CONFIRMED", "UNABLE_TO_CLASSIFY"
     human_review_required: bool
     confidence_score: float
+    clinical_action_allowed: bool = False
     safety_policy_version: str = SAFETY_POLICY_VERSION
     triage_policy_version: str = TRIAGE_POLICY_VERSION
     reason_codes: List[str] = field(default_factory=list)
@@ -44,6 +45,7 @@ class SafetyEvaluationResult:
             "screening_eligibility": self.screening_eligibility,
             "safety_state": self.safety_state,
             "automation_level": self.automation_level,
+            "clinical_action_allowed": self.clinical_action_allowed,
             "human_review_required": self.human_review_required,
             "confidence_score": round(self.confidence_score, 3),
             "safety_policy_version": self.safety_policy_version,
@@ -195,11 +197,13 @@ class SafetyDecisionEngine:
             human_review_required = False
 
         mitigation = " ".join(instructions) if instructions else None
+        clinical_action_allowed = bool(safety_state == "VERIFIED" and eligibility == "ELIGIBLE" and not human_review_required)
 
         return SafetyEvaluationResult(
             screening_eligibility=eligibility,
             safety_state=safety_state,
             automation_level=automation_level,
+            clinical_action_allowed=clinical_action_allowed,
             human_review_required=human_review_required,
             confidence_score=primary_conf,
             reason_codes=reason_codes,

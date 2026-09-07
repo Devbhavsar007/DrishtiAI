@@ -151,3 +151,148 @@ class TestEndpointFailureBoundaries:
         assert res.status_code == 400
         data = res.get_json()
         assert "error" in data
+
+    def test_analyze_rejects_corrupted_payload(self, client):
+        """POST /analyze rejects corrupted bytes with 400 and safety_state REJECTED."""
+        data = {"image": (io.BytesIO(b"MALICIOUS_GARBAGE_BYTES_CORRUPT"), "exploit.png")}
+        res = client.post("/analyze", data=data, content_type="multipart/form-data")
+        assert res.status_code == 400
+        json_data = res.get_json()
+        assert json_data["safety_state"] == "REJECTED"
+        assert json_data["clinical_action_allowed"] is False
+
+    def test_analyze_v2_rejects_corrupted_payload(self, client):
+        """POST /api/analyze-v2 rejects corrupted bytes with 400."""
+        data = {"image": (io.BytesIO(b"MALICIOUS_GARBAGE_BYTES_CORRUPT"), "exploit.png")}
+        res = client.post("/api/analyze-v2", data=data, content_type="multipart/form-data")
+        assert res.status_code == 400
+        json_data = res.get_json()
+        assert json_data["safety_state"] == "REJECTED"
+
+    def test_analyze_v3_rejects_corrupted_payload(self, client):
+        """POST /api/analyze-v3 rejects corrupted bytes with 400."""
+        data = {"image": (io.BytesIO(b"MALICIOUS_GARBAGE_BYTES_CORRUPT"), "exploit.png")}
+        res = client.post("/api/analyze-v3", data=data, content_type="multipart/form-data")
+        assert res.status_code == 400
+        json_data = res.get_json()
+        assert json_data["safety_state"] == "REJECTED"
+
+    def test_analyze_rejects_non_fundus_payload(self, client):
+        """POST /analyze rejects non-fundus image (e.g. flat blue document) with 400."""
+        blue_img = Image.new("RGB", (300, 300), color=(10, 50, 240))
+        buf = io.BytesIO()
+        blue_img.save(buf, format="JPEG")
+        data = {"image": (io.BytesIO(buf.getvalue()), "non_fundus.jpg")}
+        res = client.post("/analyze", data=data, content_type="multipart/form-data")
+        assert res.status_code == 400
+        json_data = res.get_json()
+        assert json_data["safety_state"] == "REJECTED"
+        assert json_data["screening_eligibility"] == "INELIGIBLE"
+
+
+class TestDatabaseIntegrityAndSyncRedTeam:
+    """Database concurrency, deletion tolerance, and offline sync reconciliation tests."""
+
+    def test_patient_id_monotonicity_after_deletions(self):
+        """Deleting an existing patient does not cause ID collision on subsequent patient creation."""
+        # Create patient A
+        p1 = database.create_patient("Temp Patient 1", age=45)
+        # Create patient B
+        p2 = database.create_patient("Temp Patient 2", age=50)
+        
+        # Delete patient A
+        database.delete_patient(p1["id"])
+        
+        # Create patient C — should not collide with p2
+        p3 = database.create_patient("Temp Patient 3", age=55)
+        assert p3["id"] != p2["id"]
+        assert p3["id"] != p1["id"]
+
+    def test_sync_reconciliation_conflict_requires_review(self):
+        """Incoming sync batch with stale version generates CONFLICT_REQUIRES_REVIEW."""
+        test_entity_id = f"P-TEST-SYNC-{os.urandom(4).hex()}"
+        # Set a local version = 5
+        with database.get_db() as conn:
+            conn.execute(
+                """INSERT OR REPLACE INTO sync_events (id, device_id, entity_type, entity_id, action, version, sync_status)
+                   VALUES ('evt-local-5', 'edge-1', 'patient', ?, 'UPDATE', 5, 'SYNCED')""",
+                (test_entity_id,)
+            )
+            conn.commit()
+
+        # Send incoming event with version = 3 (stale)
+        incoming = [{
+            "id": f"evt-in-{os.urandom(4).hex()}",
+            "device_id": "edge-remote",
+            "entity_type": "patient",
+            "entity_id": test_entity_id,
+            "version": 3,
+            "action": "UPDATE",
+            "payload": {"name": "Conflicted Name"}
+        }]
+
+        result = database.reconcile_sync_batch(incoming)
+        assert result["conflict_count"] == 1
+        assert test_entity_id in result["conflict_ids"]
+
+        # Verify DB status is CONFLICT_REQUIRES_REVIEW
+        with database.get_db() as conn:
+            row = conn.execute(
+                "SELECT sync_status FROM sync_events WHERE entity_id = ? AND version = 3",
+                (test_entity_id,)
+            ).fetchone()
+            assert row is not None
+            assert row["sync_status"] == "CONFLICT_REQUIRES_REVIEW"
+
+    def test_sync_reconciliation_applies_clean_update(self):
+        """Incoming sync batch with clean version updates the patient entity in the database."""
+        test_entity_id = "P-9911"
+        incoming = [{
+            "id": f"evt-in-{os.urandom(4).hex()}",
+            "device_id": "edge-remote",
+            "entity_type": "patient",
+            "entity_id": test_entity_id,
+            "version": 1,
+            "action": "CREATE",
+            "payload": {"name": "Synced Verified Patient", "age": 62, "gender": "F"}
+        }]
+
+        result = database.reconcile_sync_batch(incoming)
+        assert result["synced_count"] == 1
+        assert test_entity_id in result["synced_ids"]
+
+        # Verify patient exists in patients table
+        patient = database.get_patient(test_entity_id)
+        assert patient is not None
+        assert patient["name"] == "Synced Verified Patient"
+        assert patient["age"] == 62
+
+
+class TestSafetyArbitrationAndLaterality:
+    """Centralized safety arbitration logic and clinical invariant verification."""
+
+    def test_laterality_mismatch_never_reports_consistent(self):
+        """When operator eye and inferred eye disagree, notes must NEVER say consistent."""
+        from engine.safety.anatomy import assess_anatomy_and_laterality
+        # Synthetic test image
+        img = np.zeros((400, 400, 3), dtype=np.uint8)
+        # Force a laterality check with mismatch
+        res = assess_anatomy_and_laterality(img, operator_eye="OD")
+        for note in res.notes:
+            assert "Laterality consistent: Operator=OD, Inferred=OS" not in note
+
+    def test_central_safety_engine_blocks_clinical_action_on_uncertain(self):
+        """When safety_state is UNCERTAIN or REJECTED, clinical_action_allowed must be False."""
+        from engine.safety.decision_engine import SafetyDecisionEngine
+        from engine.safety.image_validator import ImageValidationResult
+
+        engine = SafetyDecisionEngine()
+        val = ImageValidationResult(valid=True)
+        # Detection with low confidence
+        low_conf_det = {"stage": 2, "confidence": 45.0}
+
+        res = engine.evaluate(image_val=val, primary_detection=low_conf_det)
+        assert res.safety_state == "UNCERTAIN"
+        assert res.human_review_required is True
+        assert res.clinical_action_allowed is False
+

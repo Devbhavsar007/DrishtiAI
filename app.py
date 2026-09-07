@@ -639,6 +639,10 @@ def api_screening_safety():
             "success": True,
             "safety": {
                 "status": safety.status,
+                "safety_state": safety.safety_state,
+                "automation_level": safety.automation_level,
+                "clinical_action_allowed": safety.clinical_action_allowed,
+                "screening_eligibility": safety.screening_eligibility,
                 "overall_quality_score": safety.overall_quality_score,
                 "model_confidence": safety.model_confidence,
                 "reasons": safety.reasons,
@@ -869,11 +873,31 @@ def analyze():
     if not file or not allowed_file(file.filename):
         return jsonify({"error": "Invalid file type. Use PNG, JPG, JPEG, BMP, or TIFF."}), 400
 
+    file_bytes = file.read()
+    if not file_bytes:
+        return jsonify({"error": "Empty file uploaded.", "safety_state": "REJECTED"}), 400
+
+    from engine.safety.image_validator import ImageValidator
+    validator = ImageValidator()
+    val_result = validator.validate_bytes(file_bytes)
+    if not val_result.is_valid:
+        return jsonify({
+            "error": val_result.rejection_reason or "Image validation failed",
+            "is_valid": False,
+            "safety_state": "REJECTED",
+            "screening_eligibility": "INELIGIBLE",
+            "automation_level": "UNABLE_TO_CLASSIFY",
+            "clinical_action_allowed": False,
+            "errors": val_result.errors,
+            "warnings": val_result.warnings,
+        }), 400
+
     # Save uploaded file
     analysis_id = str(uuid.uuid4())[:12]
     filename = secure_filename(file.filename)
     filepath = os.path.join(UPLOAD_DIR, f"{analysis_id}_{filename}")
-    file.save(filepath)
+    with open(filepath, "wb") as f:
+        f.write(file_bytes)
 
     # Get patient info (optional for backward compatibility)
     patient_id = request.form.get("patient_id", "")
@@ -888,7 +912,33 @@ def analyze():
         patient_info["hba1c"] = request.form.get("hba1c")
 
     try:
-        # --- 2. Preprocess Image --- (UNCHANGED)
+        raw_bgr = cv2.imread(filepath)
+        if raw_bgr is None:
+            return jsonify({
+                "error": "Corrupted image payload could not be decoded.",
+                "safety_state": "REJECTED",
+                "screening_eligibility": "INELIGIBLE",
+                "automation_level": "UNABLE_TO_CLASSIFY",
+                "clinical_action_allowed": False
+            }), 400
+
+        # Evaluate Out-of-Distribution / Non-Fundus Domain
+        ood_res = evaluate_ood_signal(raw_bgr)
+        if not ood_res.domain_valid:
+            return jsonify({
+                "error": ood_res.rejection_reason or "Non-fundus or invalid domain image rejected.",
+                "safety_state": "REJECTED",
+                "screening_eligibility": "INELIGIBLE",
+                "automation_level": "UNABLE_TO_CLASSIFY",
+                "clinical_action_allowed": False,
+                "ood": ood_res.to_dict(),
+            }), 400
+
+        # Landmark and Laterality Assessment
+        operator_eye = request.form.get("eye")
+        anatomy_res = assess_anatomy_and_laterality(raw_bgr, operator_eye=operator_eye)
+
+        # --- 2. Preprocess Image ---
         processed = preprocess_for_display(filepath)
         model_input = processed["model_input"]
         model_input_raw = processed["model_input_raw"]
@@ -899,28 +949,38 @@ def analyze():
         original_path = os.path.join(RESULTS_DIR, f"{analysis_id}_scan.png")
         cv2.imwrite(original_path, original)
 
-        # --- 3. Run Detection --- (UNCHANGED)
+        # --- 3. Run Detection ---
         detection_result = predict(model_input_enhanced_highres)
 
-        # --- 4. Generate Heatmap --- (UNCHANGED)
+        # --- 4. Centralized Safety Arbitration ---
+        safety_eval = safety_engine.evaluate(
+            image_val=val_result,
+            anatomy_res=anatomy_res,
+            ood_res=ood_res,
+            primary_detection=detection_result,
+            patient_id=patient_id,
+            operator_id=request.form.get("operator_id"),
+        )
+
+        # --- 5. Generate Heatmap ---
         heatmap_path = os.path.join(RESULTS_DIR, f"{analysis_id}_heatmap.png")
         heatmap_overlay, heatmap_raw = generate_gradcam(model_input, original, save_path=heatmap_path)
         heatmap_analysis = get_heatmap_analysis(heatmap_raw)
 
-        # --- 5. Vessel Segmentation --- (UNCHANGED)
+        # --- 6. Vessel Segmentation ---
         vessel_path = os.path.join(RESULTS_DIR, f"{analysis_id}_vessels.png")
         vessel_map, vessel_stats = segment_vessels(original, save_path=vessel_path)
 
-        # --- 6. Gemma Report --- (UNCHANGED)
+        # --- 7. Gemma Report ---
         report, _raw_gemma = generate_report(
             detection_result, heatmap_analysis, vessel_stats, patient_info
         )
 
         elapsed = round(time.time() - start_time, 2)
-        log.info("Analysis %s completed in %.2fs — stage %s",
-                 analysis_id, elapsed, detection_result.get('stage', '?'))
+        log.info("Analysis %s completed in %.2fs — stage %s (Safety: %s)",
+                 analysis_id, elapsed, detection_result.get('stage', '?'), safety_eval.safety_state)
 
-        # --- 7. Save to Database (NEW) ---
+        # --- 8. Save to Database ---
         image_paths = {
             "original": f"/results/{analysis_id}_scan.png",
             "heatmap": f"/results/{analysis_id}_heatmap.png",
@@ -943,13 +1003,18 @@ def analyze():
             except Exception as db_err:
                 log.warning("Failed to save scan to DB: %s", db_err)
 
-        # --- 8. Compile Response --- (UNCHANGED format)
+        # --- 9. Compile Response ---
         result = {
             "success": True,
             "analysis_id": analysis_id,
             "patient_id": patient_id,
             "processing_time": elapsed,
             "detection": detection_result,
+            "safety": safety_eval.to_dict(),
+            "safety_state": safety_eval.safety_state,
+            "automation_level": safety_eval.automation_level,
+            "clinical_action_allowed": safety_eval.clinical_action_allowed,
+            "screening_eligibility": safety_eval.screening_eligibility,
             "heatmap_analysis": heatmap_analysis,
             "vessel_stats": vessel_stats,
             "report": report,
@@ -1014,11 +1079,31 @@ def analyze_v2():
     if not file or not allowed_file(file.filename):
         return jsonify({"error": "Invalid file type. Use PNG, JPG, JPEG, BMP, or TIFF."}), 400
 
+    file_bytes = file.read()
+    if not file_bytes:
+        return jsonify({"error": "Empty file uploaded.", "safety_state": "REJECTED"}), 400
+
+    from engine.safety.image_validator import ImageValidator
+    validator = ImageValidator()
+    val_result = validator.validate_bytes(file_bytes)
+    if not val_result.is_valid:
+        return jsonify({
+            "error": val_result.rejection_reason or "Image validation failed",
+            "is_valid": False,
+            "safety_state": "REJECTED",
+            "screening_eligibility": "INELIGIBLE",
+            "automation_level": "UNABLE_TO_CLASSIFY",
+            "clinical_action_allowed": False,
+            "errors": val_result.errors,
+            "warnings": val_result.warnings,
+        }), 400
+
     # Save uploaded file
     analysis_id = str(uuid.uuid4())[:12]
     filename = secure_filename(file.filename)
     filepath = os.path.join(UPLOAD_DIR, f"{analysis_id}_{filename}")
-    file.save(filepath)
+    with open(filepath, "wb") as f:
+        f.write(file_bytes)
 
     # Patient info
     patient_id = request.form.get("patient_id", "")
@@ -1029,12 +1114,34 @@ def analyze_v2():
             patient_info[field_name] = val
 
     try:
-        # ── MODULE 1: Image Quality Assessment ──
-        from engine.pipeline.iqa import run_iqa
         img_bgr = cv2.imread(filepath)
         if img_bgr is None:
-            return jsonify({"error": "Could not read image file."}), 400
+            return jsonify({
+                "error": "Could not decode image file.",
+                "safety_state": "REJECTED",
+                "screening_eligibility": "INELIGIBLE",
+                "automation_level": "UNABLE_TO_CLASSIFY",
+                "clinical_action_allowed": False
+            }), 400
 
+        # Evaluate Out-of-Distribution / Non-Fundus Domain
+        ood_res = evaluate_ood_signal(img_bgr)
+        if not ood_res.domain_valid:
+            return jsonify({
+                "error": ood_res.rejection_reason or "Non-fundus or invalid domain image rejected.",
+                "safety_state": "REJECTED",
+                "screening_eligibility": "INELIGIBLE",
+                "automation_level": "UNABLE_TO_CLASSIFY",
+                "clinical_action_allowed": False,
+                "ood": ood_res.to_dict(),
+            }), 400
+
+        # Landmark and Laterality Assessment
+        operator_eye = request.form.get("eye")
+        anatomy_res = assess_anatomy_and_laterality(img_bgr, operator_eye=operator_eye)
+
+        # ── MODULE 1: Image Quality Assessment ──
+        from engine.pipeline.iqa import run_iqa
         iqa_result, processed_img = run_iqa(img_bgr)
 
         if iqa_result.decision == "REJECT" or processed_img is None:
@@ -1045,6 +1152,10 @@ def analyze_v2():
                 "success": True,
                 "analysis_id": analysis_id,
                 "status": "REJECTED",
+                "safety_state": "REJECTED",
+                "screening_eligibility": "INELIGIBLE",
+                "automation_level": "UNABLE_TO_CLASSIFY",
+                "clinical_action_allowed": False,
                 "iqa": iqa_result.to_dict(),
                 "message": " ".join(iqa_result.feedback),
                 "processing_time": elapsed,
@@ -1184,6 +1295,16 @@ def analyze_v2():
             except Exception as db_err:
                 log.warning("Failed to save scan to DB: %s", db_err)
 
+        # ── Centralized Safety Arbitration ──
+        safety_eval = safety_engine.evaluate(
+            image_val=val_result,
+            anatomy_res=anatomy_res,
+            ood_res=ood_res,
+            primary_detection=detection_result,
+            patient_id=patient_id,
+            operator_id=request.form.get("operator_id"),
+        )
+
         # ── Compile v2 response ──
         result = {
             "success": True,
@@ -1192,6 +1313,13 @@ def analyze_v2():
             "patient_id": patient_id,
             "processing_time": elapsed,
             "status": "OK",
+
+            # Central Safety Arbitration
+            "safety": safety_eval.to_dict(),
+            "safety_state": safety_eval.safety_state,
+            "automation_level": safety_eval.automation_level,
+            "clinical_action_allowed": safety_eval.clinical_action_allowed,
+            "screening_eligibility": safety_eval.screening_eligibility,
 
             # Module 1: IQA
             "iqa": iqa_result.to_dict(),
@@ -1247,10 +1375,30 @@ def analyze_v3():
     if not file or not allowed_file(file.filename):
         return jsonify({"error": "Invalid file type. Use PNG, JPG, JPEG, BMP, or TIFF."}), 400
 
+    file_bytes = file.read()
+    if not file_bytes:
+        return jsonify({"error": "Empty file uploaded.", "safety_state": "REJECTED"}), 400
+
+    from engine.safety.image_validator import ImageValidator
+    validator = ImageValidator()
+    val_result = validator.validate_bytes(file_bytes)
+    if not val_result.is_valid:
+        return jsonify({
+            "error": val_result.rejection_reason or "Image validation failed",
+            "is_valid": False,
+            "safety_state": "REJECTED",
+            "screening_eligibility": "INELIGIBLE",
+            "automation_level": "UNABLE_TO_CLASSIFY",
+            "clinical_action_allowed": False,
+            "errors": val_result.errors,
+            "warnings": val_result.warnings,
+        }), 400
+
     analysis_id = str(uuid.uuid4())[:12]
     filename = secure_filename(file.filename)
     filepath = os.path.join(UPLOAD_DIR, f"{analysis_id}_{filename}")
-    file.save(filepath)
+    with open(filepath, "wb") as f:
+        f.write(file_bytes)
 
     patient_id = request.form.get("patient_id", "")
     patient_info = {}
@@ -1265,6 +1413,32 @@ def analyze_v3():
     )
 
     try:
+        raw_bgr = cv2.imread(filepath)
+        if raw_bgr is None:
+            return jsonify({
+                "error": "Could not decode image file.",
+                "safety_state": "REJECTED",
+                "screening_eligibility": "INELIGIBLE",
+                "automation_level": "UNABLE_TO_CLASSIFY",
+                "clinical_action_allowed": False
+            }), 400
+
+        # Evaluate Out-of-Distribution / Non-Fundus Domain
+        ood_res = evaluate_ood_signal(raw_bgr)
+        if not ood_res.domain_valid:
+            return jsonify({
+                "error": ood_res.rejection_reason or "Non-fundus or invalid domain image rejected.",
+                "safety_state": "REJECTED",
+                "screening_eligibility": "INELIGIBLE",
+                "automation_level": "UNABLE_TO_CLASSIFY",
+                "clinical_action_allowed": False,
+                "ood": ood_res.to_dict(),
+            }), 400
+
+        # Landmark and Laterality Assessment
+        operator_eye = request.form.get("eye")
+        anatomy_res = assess_anatomy_and_laterality(raw_bgr, operator_eye=operator_eye)
+
         from engine.pipeline.two_tier_runner import run_two_tier_pipeline
 
         result = run_two_tier_pipeline(
@@ -1277,6 +1451,21 @@ def analyze_v3():
 
         result["analysis_id"] = analysis_id
         result["patient_id"] = patient_id
+
+        # Centralized Safety Arbitration
+        safety_eval = safety_engine.evaluate(
+            image_val=val_result,
+            anatomy_res=anatomy_res,
+            ood_res=ood_res,
+            primary_detection=result.get("detection"),
+            patient_id=patient_id,
+            operator_id=request.form.get("operator_id"),
+        )
+        result["safety"] = safety_eval.to_dict()
+        result["safety_state"] = safety_eval.safety_state
+        result["automation_level"] = safety_eval.automation_level
+        result["clinical_action_allowed"] = safety_eval.clinical_action_allowed
+        result["screening_eligibility"] = safety_eval.screening_eligibility
 
         # Save to DB if patient_id provided
         if patient_id and result.get("status") != "REJECTED":

@@ -137,7 +137,9 @@ def assess_anatomy_and_laterality(
     requires_confirmation = False
 
     if norm_operator_eye and inferred_lat != "UNKNOWN":
-        if norm_operator_eye != inferred_lat and confidence >= 0.70:
+        if norm_operator_eye == inferred_lat:
+            notes.append(f"Laterality verified consistent: Operator={norm_operator_eye}, Inferred={inferred_lat}.")
+        elif confidence >= 0.70:
             mismatch = True
             requires_confirmation = True
             notes.append(
@@ -146,7 +148,12 @@ def assess_anatomy_and_laterality(
                 "Human confirmation required before finalizing session."
             )
         else:
-            notes.append(f"Laterality consistent: Operator={norm_operator_eye}, Inferred={inferred_lat}.")
+            requires_confirmation = True
+            notes.append(
+                f"LATERALITY_INDETERMINATE: Operator selected {norm_operator_eye}, "
+                f"landmark detection suggests {inferred_lat} with low confidence ({confidence:.2f}). "
+                "Operator verification recommended."
+            )
 
     return AnatomyResult(
         valid_anatomy=True,

@@ -70,6 +70,10 @@ def evaluate_safety(
             reasons=sorted(set(reasons)),
             human_review_required=True,
             retake_guidance=retake_guidance,
+            safety_state="REJECTED",
+            automation_level="UNABLE_TO_CLASSIFY",
+            clinical_action_allowed=False,
+            screening_eligibility="INELIGIBLE",
             metadata={"quality_decision": quality_decision},
         )
 
@@ -101,11 +105,19 @@ def evaluate_safety(
     # Decide status
     if "QUALITY_BORDERLINE" in reasons or "LOW_MODEL_CONFIDENCE" in reasons or "MODEL_DISAGREEMENT_SIGNIFICANT" in reasons:
         status = "UNCERTAIN"
+        safety_state = "UNCERTAIN"
+        automation_level = "HUMAN_REVIEW_REQUIRED"
+        screening_eligibility = "REQUIRES_CONFIRMATION"
+        clinical_action_allowed = False
         retake_guidance = (
             "Screening confidence is borderline. Clinician inspection of raw fundus image is recommended."
         )
     else:
         status = "PROCEED"
+        safety_state = "VERIFIED"
+        automation_level = "AUTOMATED_ASSISTANCE"
+        screening_eligibility = "ELIGIBLE"
+        clinical_action_allowed = True
         reasons.append("SCREENING_VALID")
 
     return SafetyDecision(
@@ -115,5 +127,9 @@ def evaluate_safety(
         reasons=sorted(set(reasons)),
         human_review_required=human_review_required,
         retake_guidance=retake_guidance,
+        safety_state=safety_state,
+        automation_level=automation_level,
+        clinical_action_allowed=clinical_action_allowed,
+        screening_eligibility=screening_eligibility,
         metadata={"primary_stage": primary_stage, "quality_decision": quality_decision},
     )

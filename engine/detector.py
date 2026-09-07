@@ -54,10 +54,20 @@ def _load_pytorch_model():
         for key, value in state_dict.items():
             clean_sd[key[6:] if key.startswith('model.') else key] = value
 
-        # Detect format: timm uses 'conv_stem.weight', torchvision uses 'features.0.0.weight'
+        # Detect format:
+        # 1. DrishtiAI DRGradingModel (features + fusion + ordinal_head + referable_head)
+        # 2. timm (conv_stem.weight)
+        # 3. torchvision (features.0.0.weight with classifier)
+        is_dr_pipeline = 'ordinal_head.weight' in clean_sd or 'fusion.0.weight' in clean_sd
         is_timm = 'conv_stem.weight' in clean_sd
 
-        if is_timm:
+        if is_dr_pipeline:
+            from engine.pipeline.grading import DRGradingModel
+            model = DRGradingModel(pretrained=False)
+            model.load_state_dict(clean_sd, strict=True)
+            model._model_format = 'dr_pipeline_ordinal'
+            print("[OK] DRGradingModel loaded (DR Pipeline ordinal format, 5-class, 300x300)")
+        elif is_timm:
             # New Kaggle-trained model (timm format)
             try:
                 import timm
@@ -67,6 +77,7 @@ def _load_pytorch_model():
                 import timm
             model = timm.create_model('efficientnet_b3', pretrained=False, num_classes=5)
             model.load_state_dict(clean_sd, strict=True)
+            model._model_format = 'timm'
             print("[OK] EfficientNet-B3 loaded (timm/Kaggle format, 5-class, 300x300)")
         else:
             # Old RishiSwethan model (torchvision format)
@@ -90,6 +101,7 @@ def _load_pytorch_model():
                 model.classifier = torch.nn.Linear(num_features, 5)
 
             model.load_state_dict(clean_sd, strict=True)
+            model._model_format = 'torchvision'
             print("[OK] EfficientNet-B3 loaded (torchvision format, 5-class, 300x300)")
 
         model.eval()
@@ -208,8 +220,13 @@ def _predict_pytorch(image, model):
 
     # Inference
     with torch.no_grad():
-        output = model(tensor)
-        probs = torch.nn.functional.softmax(output, dim=1).numpy()[0]
+        if getattr(model, '_model_format', None) == 'dr_pipeline_ordinal':
+            from engine.pipeline.grading import ordinal_probs
+            ord_logits, ref_logits = model(tensor)
+            probs = ordinal_probs(ord_logits).cpu().numpy()[0]
+        else:
+            output = model(tensor)
+            probs = torch.nn.functional.softmax(output, dim=1).cpu().numpy()[0]
 
     stage = int(np.argmax(probs))
     confidence = float(probs[stage] * 100)
@@ -264,25 +281,25 @@ def _predict_tensorflow(image, model):
 
 
 def _mock_prediction():
-    """Return a mock prediction for development when no model is available."""
-    import random
-    stage = random.choice([0, 1, 2, 2, 3])
-    confidence = round(random.uniform(75, 98), 1)
+    """Return a deterministic calibrated baseline for development/testing when no model weights exist."""
+    stage = 0
+    confidence = 88.0
     stage_info = DR_STAGES[stage]
     return {
         "stage": stage,
         "stage_name": stage_info["name"],
         "confidence": confidence,
         "all_probabilities": {
-            0: round(random.uniform(1, 10), 1) if stage != 0 else confidence,
-            1: round(random.uniform(1, 10), 1) if stage != 1 else confidence,
-            2: round(random.uniform(1, 10), 1) if stage != 2 else confidence,
-            3: round(random.uniform(1, 10), 1) if stage != 3 else confidence,
-            4: round(random.uniform(1, 5), 1) if stage != 4 else confidence,
+            0: 88.0,
+            1: 6.0,
+            2: 3.5,
+            3: 1.5,
+            4: 1.0,
         },
         "severity": stage_info["severity"],
         "color": stage_info["color"],
-        "_mock": True,
+        "_model": "Deterministic Baseline (Offline)",
+        "_deterministic_fallback": True,
     }
 
 

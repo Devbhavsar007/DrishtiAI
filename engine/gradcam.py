@@ -88,13 +88,14 @@ def generate_gradcam(preprocessed_image, original_image, save_path=None):
         disp_h, disp_w = original_image.shape[:2]
         heatmap_raw = cv2.resize(cam, (disp_w, disp_h))
 
-        # If real Grad-CAM is too faint (common for "No DR" predictions),
-        # blend with simulated heatmap for better visual presentation
-        if heatmap_raw.max() < 0.15 or heatmap_raw.mean() < 0.02:
-            _, sim_raw = _generate_simulated_heatmap(original_image)
-            # Blend: 40% real + 60% simulated
-            heatmap_raw = 0.4 * heatmap_raw + 0.6 * sim_raw
+        # Authentic explainability: Do NOT blend synthetic hotspots into real activations.
+        # If real Grad-CAM is faint (e.g. Stage 0 No DR), faithfully maintain low/diffuse activation
+        # to ensure clinicians see genuine absence of focal pathology.
+        if heatmap_raw.max() > 1e-6:
             heatmap_raw = heatmap_raw / heatmap_raw.max()
+        else:
+            # Complete absence of activation: uniform zero-baseline
+            heatmap_raw = np.zeros_like(heatmap_raw, dtype=np.float32)
 
         # Create colored heatmap overlay
         heatmap_overlay = _apply_heatmap(original_image, heatmap_raw)
