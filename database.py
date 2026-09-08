@@ -283,6 +283,226 @@ def init_db():
             VALUES (4, 'Canonical schema indices and safety state optimization');
         """)
 
+        # ---------------------------------------------------------------
+        # Migration v5: Intelligence Control Plane — ML Platform Tables
+        # ---------------------------------------------------------------
+        conn.executescript("""
+            -- Versioned training datasets
+            CREATE TABLE IF NOT EXISTS training_datasets (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                version TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'BUILDING',
+                created_at TEXT DEFAULT (datetime('now')),
+                finalized_at TEXT,
+                total_samples INTEGER DEFAULT 0,
+                total_patients INTEGER DEFAULT 0,
+                class_distribution TEXT DEFAULT '{}',
+                site_distribution TEXT DEFAULT '{}',
+                device_distribution TEXT DEFAULT '{}',
+                split_strategy TEXT DEFAULT 'patient_stratified',
+                preprocessing_version TEXT DEFAULT '1.0',
+                pipeline_version TEXT DEFAULT '1.0',
+                git_sha TEXT DEFAULT '',
+                manifest_checksum TEXT DEFAULT '',
+                manifest_json TEXT DEFAULT '{}',
+                exclusion_summary TEXT DEFAULT '{}',
+                created_by TEXT DEFAULT 'system',
+                UNIQUE(name, version)
+            );
+
+            -- Individual training sample records
+            CREATE TABLE IF NOT EXISTS training_samples (
+                id TEXT PRIMARY KEY,
+                dataset_id TEXT NOT NULL,
+                scan_id TEXT NOT NULL,
+                patient_id TEXT NOT NULL,
+                split TEXT NOT NULL DEFAULT 'TRAIN',
+                label INTEGER NOT NULL,
+                label_provenance TEXT NOT NULL DEFAULT 'AI_ONLY',
+                doctor_review_id TEXT DEFAULT '',
+                eligibility_status TEXT NOT NULL DEFAULT 'ELIGIBLE',
+                rejection_reason TEXT DEFAULT '',
+                quality_score REAL DEFAULT 0.0,
+                image_hash TEXT DEFAULT '',
+                uncertainty_score REAL DEFAULT 0.0,
+                active_learning_priority REAL DEFAULT 0.0,
+                metadata_json TEXT DEFAULT '{}',
+                created_at TEXT DEFAULT (datetime('now')),
+                FOREIGN KEY (dataset_id) REFERENCES training_datasets(id),
+                FOREIGN KEY (scan_id) REFERENCES scans(id),
+                FOREIGN KEY (patient_id) REFERENCES patients(id)
+            );
+
+            -- Training job records
+            CREATE TABLE IF NOT EXISTS training_runs (
+                id TEXT PRIMARY KEY,
+                dataset_id TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'QUEUED',
+                config_json TEXT DEFAULT '{}',
+                parent_checkpoint TEXT DEFAULT '',
+                started_at TEXT,
+                completed_at TEXT,
+                duration_seconds REAL DEFAULT 0,
+                final_metrics_json TEXT DEFAULT '{}',
+                best_checkpoint_path TEXT DEFAULT '',
+                calibration_path TEXT DEFAULT '',
+                history_json TEXT DEFAULT '[]',
+                error_message TEXT DEFAULT '',
+                git_sha TEXT DEFAULT '',
+                triggered_by TEXT DEFAULT 'system',
+                created_at TEXT DEFAULT (datetime('now')),
+                FOREIGN KEY (dataset_id) REFERENCES training_datasets(id)
+            );
+
+            -- Immutable model registry
+            CREATE TABLE IF NOT EXISTS model_versions (
+                version_id TEXT PRIMARY KEY,
+                model_family TEXT NOT NULL DEFAULT 'drishti-retina',
+                version_tag TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'EXPERIMENTAL',
+                training_run_id TEXT DEFAULT '',
+                dataset_id TEXT DEFAULT '',
+                architecture TEXT DEFAULT 'EfficientNet-B3-Ordinal',
+                input_schema TEXT DEFAULT '{}',
+                output_schema TEXT DEFAULT '{}',
+                preprocessing_version TEXT DEFAULT '1.0',
+                calibration_version TEXT DEFAULT '1.0',
+                threshold_schema TEXT DEFAULT '{}',
+                weights_path TEXT DEFAULT '',
+                weights_checksum TEXT DEFAULT '',
+                calibration_path TEXT DEFAULT '',
+                evaluation_summary_json TEXT DEFAULT '{}',
+                compatibility_version TEXT DEFAULT '1.0',
+                created_at TEXT DEFAULT (datetime('now')),
+                promoted_at TEXT,
+                archived_at TEXT,
+                created_by TEXT DEFAULT 'system',
+                FOREIGN KEY (training_run_id) REFERENCES training_runs(id),
+                FOREIGN KEY (dataset_id) REFERENCES training_datasets(id),
+                UNIQUE(model_family, version_tag)
+            );
+
+            -- Evaluation results per model version
+            CREATE TABLE IF NOT EXISTS model_evaluations (
+                id TEXT PRIMARY KEY,
+                model_version_id TEXT NOT NULL,
+                dataset_id TEXT DEFAULT '',
+                eval_type TEXT NOT NULL DEFAULT 'STANDARD',
+                metrics_json TEXT DEFAULT '{}',
+                confusion_matrix_json TEXT DEFAULT '{}',
+                per_class_json TEXT DEFAULT '{}',
+                calibration_json TEXT DEFAULT '{}',
+                regression_vs_production_json TEXT DEFAULT '{}',
+                safety_gate_results_json TEXT DEFAULT '{}',
+                passed_safety_gates INTEGER DEFAULT 0,
+                evaluator_id TEXT DEFAULT 'system',
+                created_at TEXT DEFAULT (datetime('now')),
+                FOREIGN KEY (model_version_id) REFERENCES model_versions(version_id),
+                FOREIGN KEY (dataset_id) REFERENCES training_datasets(id)
+            );
+
+            -- Human approval records
+            CREATE TABLE IF NOT EXISTS model_approvals (
+                id TEXT PRIMARY KEY,
+                model_version_id TEXT NOT NULL,
+                evaluation_id TEXT DEFAULT '',
+                decision TEXT NOT NULL DEFAULT 'PENDING',
+                approver_id TEXT NOT NULL,
+                approver_role TEXT NOT NULL,
+                rationale TEXT DEFAULT '',
+                conditions TEXT DEFAULT '',
+                created_at TEXT DEFAULT (datetime('now')),
+                FOREIGN KEY (model_version_id) REFERENCES model_versions(version_id),
+                FOREIGN KEY (evaluation_id) REFERENCES model_evaluations(id)
+            );
+
+            -- Deployment history
+            CREATE TABLE IF NOT EXISTS deployments (
+                id TEXT PRIMARY KEY,
+                model_version_id TEXT NOT NULL,
+                environment TEXT NOT NULL DEFAULT 'staging',
+                status TEXT NOT NULL DEFAULT 'DEPLOYING',
+                approval_id TEXT DEFAULT '',
+                deployed_by TEXT DEFAULT 'system',
+                deployed_at TEXT DEFAULT (datetime('now')),
+                rolled_back_at TEXT,
+                rollback_reason TEXT DEFAULT '',
+                previous_version_id TEXT DEFAULT '',
+                FOREIGN KEY (model_version_id) REFERENCES model_versions(version_id),
+                FOREIGN KEY (approval_id) REFERENCES model_approvals(id)
+            );
+
+            -- Drift observation events
+            CREATE TABLE IF NOT EXISTS drift_events (
+                id TEXT PRIMARY KEY,
+                drift_type TEXT NOT NULL DEFAULT 'INPUT',
+                severity TEXT NOT NULL DEFAULT 'NORMAL',
+                model_version_id TEXT DEFAULT '',
+                metrics_json TEXT DEFAULT '{}',
+                detection_method TEXT DEFAULT '',
+                window_start TEXT,
+                window_end TEXT,
+                sample_count INTEGER DEFAULT 0,
+                details TEXT DEFAULT '',
+                acknowledged_by TEXT DEFAULT '',
+                acknowledged_at TEXT,
+                created_at TEXT DEFAULT (datetime('now')),
+                FOREIGN KEY (model_version_id) REFERENCES model_versions(version_id)
+            );
+
+            -- Batch data quality assessments
+            CREATE TABLE IF NOT EXISTS data_quality_events (
+                id TEXT PRIMARY KEY,
+                scan_id TEXT DEFAULT '',
+                patient_id TEXT DEFAULT '',
+                check_type TEXT NOT NULL,
+                passed INTEGER NOT NULL DEFAULT 1,
+                score REAL DEFAULT 0.0,
+                details TEXT DEFAULT '',
+                batch_id TEXT DEFAULT '',
+                created_at TEXT DEFAULT (datetime('now')),
+                FOREIGN KEY (scan_id) REFERENCES scans(id)
+            );
+
+            -- End-to-end pipeline orchestration records
+            CREATE TABLE IF NOT EXISTS training_pipeline_runs (
+                id TEXT PRIMARY KEY,
+                status TEXT NOT NULL DEFAULT 'INITIATED',
+                dataset_id TEXT DEFAULT '',
+                training_run_id TEXT DEFAULT '',
+                model_version_id TEXT DEFAULT '',
+                schedule_type TEXT DEFAULT 'manual',
+                started_at TEXT DEFAULT (datetime('now')),
+                completed_at TEXT,
+                error_message TEXT DEFAULT '',
+                report_json TEXT DEFAULT '{}',
+                triggered_by TEXT DEFAULT 'system',
+                FOREIGN KEY (dataset_id) REFERENCES training_datasets(id),
+                FOREIGN KEY (training_run_id) REFERENCES training_runs(id),
+                FOREIGN KEY (model_version_id) REFERENCES model_versions(version_id)
+            );
+
+            -- Indexes for Intelligence Control Plane queries
+            CREATE INDEX IF NOT EXISTS idx_training_samples_dataset ON training_samples(dataset_id);
+            CREATE INDEX IF NOT EXISTS idx_training_samples_scan ON training_samples(scan_id);
+            CREATE INDEX IF NOT EXISTS idx_training_samples_patient ON training_samples(patient_id);
+            CREATE INDEX IF NOT EXISTS idx_training_samples_eligibility ON training_samples(eligibility_status);
+            CREATE INDEX IF NOT EXISTS idx_training_runs_dataset ON training_runs(dataset_id);
+            CREATE INDEX IF NOT EXISTS idx_training_runs_status ON training_runs(status);
+            CREATE INDEX IF NOT EXISTS idx_model_versions_status ON model_versions(status);
+            CREATE INDEX IF NOT EXISTS idx_model_approvals_version ON model_approvals(model_version_id);
+            CREATE INDEX IF NOT EXISTS idx_drift_events_severity ON drift_events(severity);
+            CREATE INDEX IF NOT EXISTS idx_drift_events_model ON drift_events(model_version_id);
+            CREATE INDEX IF NOT EXISTS idx_data_quality_scan ON data_quality_events(scan_id);
+            CREATE INDEX IF NOT EXISTS idx_pipeline_runs_status ON training_pipeline_runs(status);
+        """)
+
+        conn.execute("""
+            INSERT OR IGNORE INTO schema_migrations (version, description)
+            VALUES (5, 'Intelligence Control Plane: datasets, samples, runs, model registry, approvals, drift, quality events');
+        """)
+
         conn.commit()
     log.info("Database initialized at %s", DB_PATH)
 

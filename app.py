@@ -45,8 +45,10 @@ from engine.clinical.safety import evaluate_safety
 from engine.clinical.rag import MedicalRAGRetriever
 from engine.security.auth import (
     Role,
+    AdminRole,
     create_access_token,
     require_role,
+    require_admin_role,
     get_current_actor,
     verify_role_credentials,
 )
@@ -114,6 +116,7 @@ limiter = Limiter(
     default_limits=["60 per minute"],
     storage_uri=RATELIMIT_STORAGE_URI,
 )
+
 
 # ---------------------------------------------------------------------------
 # Request Correlation & Security Headers Middleware
@@ -905,7 +908,7 @@ def api_auth_login():
     data = request.get_json(silent=True) or {}
     user_id = data.get("user_id", "").strip() or f"user-{uuid.uuid4().hex[:6]}"
     requested_role = str(data.get("role") or Role.HEALTH_WORKER.value).upper()
-    valid_roles = {r.value for r in Role}
+    valid_roles = {r.value for r in Role} | {r.value for r in AdminRole}
     if requested_role not in valid_roles:
         return jsonify({
             "success": False,
@@ -1991,12 +1994,23 @@ def analyze_v3():
 
 
 # ========================================
+# INTELLIGENCE CONTROL PLANE — Admin API Blueprint
+# ========================================
+try:
+    from backend.admin_api import admin_bp
+    app.register_blueprint(admin_bp, url_prefix="/api/admin")
+    log.info("Intelligence Control Plane admin API registered at /api/admin")
+except ImportError:
+    log.warning("Admin API module not found — Intelligence Control Plane disabled")
+
+
+# ========================================
 # STARTUP
 # ========================================
 
 if __name__ == "__main__":
     log.info("=" * 60)
-    log.info("  DrishtiAI v2.1 — Hardened Clinical System")
+    log.info("  DrishtiAI v2.2 — Clinical Platform + Intelligence Control Plane")
     log.info("  http://127.0.0.1:5000")
     log.info("=" * 60)
     app.run(host="0.0.0.0", port=5000, debug=DEBUG, use_reloader=False)

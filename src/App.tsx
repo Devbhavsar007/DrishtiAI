@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React from 'react';
+import React, { useState } from 'react';
 import { AccessibilityProvider } from './context/AccessibilityContext';
 import { MedicalDataProvider, useMedicalData } from './context/MedicalDataContext';
 import { AccessibilityToolbar } from './components/AccessibilityToolbar';
@@ -14,6 +14,19 @@ import { BatchScreeningView } from './components/BatchScreeningView';
 import { PatientDirectoryView } from './components/PatientDirectoryView';
 import { PatientDetailView } from './components/PatientDetailView';
 import { LandingPageView } from './components/LandingPageView';
+
+// Intelligence Control Plane components
+import { AdminLayout, AdminView } from './components/admin/AdminLayout';
+import { AdminDashboard } from './components/admin/AdminDashboard';
+import { DataOverview } from './components/admin/DataOverview';
+import { DatasetManager } from './components/admin/DatasetManager';
+import { TrainingRuns } from './components/admin/TrainingRuns';
+import { ModelRegistry } from './components/admin/ModelRegistry';
+import { DriftMonitor } from './components/admin/DriftMonitor';
+import { ApprovalWorkflow } from './components/admin/ApprovalWorkflow';
+import { AuditLog } from './components/admin/AuditLog';
+import { SystemHealth } from './components/admin/SystemHealth';
+import { AdminRole } from './types';
 
 const MainContent: React.FC = () => {
   const { activeView } = useMedicalData();
@@ -49,8 +62,40 @@ export default function App() {
 }
 
 const AppBody: React.FC = () => {
-  const { activeView } = useMedicalData();
+  const { activeView, setActiveView } = useMedicalData();
+  const [adminView, setAdminView] = useState<AdminView>('dashboard');
+  const [adminRole, setAdminRole] = useState<AdminRole>('SUPER_ADMIN');
 
+  // Intelligence Control Plane Logical View
+  if (activeView === 'admin') {
+    return (
+      <AdminLayout
+        currentView={adminView}
+        onSelectView={setAdminView}
+        adminRole={adminRole}
+        onRoleChange={setAdminRole}
+        onExitAdmin={() => {
+          if (typeof window !== 'undefined' && window.location.port === '3001') {
+            window.location.href = `http://${window.location.hostname}:3000`;
+          } else {
+            setActiveView('dashboard');
+          }
+        }}
+      >
+        {adminView === 'dashboard' && <AdminDashboard onNavigate={setAdminView} />}
+        {adminView === 'data' && <DataOverview />}
+        {adminView === 'datasets' && <DatasetManager />}
+        {adminView === 'training' && <TrainingRuns />}
+        {adminView === 'models' && <ModelRegistry />}
+        {adminView === 'drift' && <DriftMonitor />}
+        {adminView === 'approvals' && <ApprovalWorkflow adminRole={adminRole} />}
+        {adminView === 'audit' && <AuditLog />}
+        {adminView === 'system' && <SystemHealth />}
+      </AdminLayout>
+    );
+  }
+
+  // Clinical Platform Landing View
   if (activeView === 'landing') {
     return (
       <div className="min-h-screen bg-[#619FE8] text-white transition-colors duration-150 font-sans selection:bg-[#E1FA4A] selection:text-black grain-overlay">
@@ -59,6 +104,7 @@ const AppBody: React.FC = () => {
     );
   }
 
+  // Clinical Platform Workspace (Doctor / Technician / Health Worker)
   return (
     <div className="min-h-screen bg-[#619FE8] text-white transition-colors duration-150 flex flex-col font-sans selection:bg-[#E1FA4A] selection:text-black relative grain-overlay">
       {/* Skip link for screen-readers and keyboard navigators */}

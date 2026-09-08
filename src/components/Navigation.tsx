@@ -1,5 +1,5 @@
 import React from 'react';
-import { LayoutDashboard, Microscope, Layers, Users, UserCircle2 } from 'lucide-react';
+import { LayoutDashboard, Microscope, Layers, Users } from 'lucide-react';
 import { useMedicalData } from '../context/MedicalDataContext';
 import { ActiveView } from '../types';
 
@@ -44,6 +44,7 @@ export const Navigation: React.FC = () => {
       description: 'Longitudinal records & HbA1c history',
     },
   ];
+
 
   return (
     <>

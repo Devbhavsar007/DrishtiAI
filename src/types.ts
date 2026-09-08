@@ -206,7 +206,7 @@ export interface DashboardStats {
 
 export type ReportLanguage = 'english' | 'hindi' | 'gujarati';
 
-export type ActiveView = 'landing' | 'dashboard' | 'new-scan' | 'batch-screening' | 'patients' | 'patient-detail';
+export type ActiveView = 'landing' | 'dashboard' | 'new-scan' | 'batch-screening' | 'patients' | 'patient-detail' | 'admin';
 
 export interface ProgressionAssessment {
   engine: string;
@@ -302,3 +302,118 @@ export interface GroundedMedicalQueryResponse {
   disclaimer: string;
   metadata?: Record<string, any>;
 }
+
+// ===========================================================================
+// Intelligence Control Plane Types
+// ===========================================================================
+
+export type AdminRole =
+  | 'SUPER_ADMIN'
+  | 'ML_ENGINEER'
+  | 'DATA_STEWARD'
+  | 'CLINICAL_REVIEWER'
+  | 'SECURITY_ADMIN'
+  | 'AUDITOR';
+
+export type ModelStatus =
+  | 'EXPERIMENTAL'
+  | 'TRAINED'
+  | 'EVALUATED'
+  | 'CANDIDATE'
+  | 'APPROVED'
+  | 'STAGED'
+  | 'PRODUCTION'
+  | 'ARCHIVED';
+
+export interface ModelVersion {
+  version_id: string;
+  version_tag: string;
+  model_family?: string;
+  status: ModelStatus;
+  training_run_id?: string;
+  dataset_id?: string;
+  architecture: string;
+  weights_path?: string;
+  calibration_path?: string;
+  evaluation_summary_json?: string;
+  created_by: string;
+  created_at: string;
+  promoted_at?: string;
+  archived_at?: string;
+}
+
+export interface TrainingRun {
+  id: string;
+  dataset_id: string;
+  status: 'QUEUED' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
+  config_json: any;
+  parent_checkpoint?: string;
+  started_at?: string;
+  completed_at?: string;
+  duration_seconds?: number;
+  final_metrics_json?: any;
+  best_checkpoint_path?: string;
+  calibration_path?: string;
+  error_message?: string;
+  created_at: string;
+  triggered_by?: string;
+}
+
+export interface TrainingDataset {
+  id: string;
+  name: string;
+  version: string;
+  status: string;
+  total_samples: number;
+  total_patients: number;
+  class_distribution?: string;
+  manifest_checksum?: string;
+  manifest_json?: string;
+  created_at: string;
+  created_by?: string;
+}
+
+export interface DriftEvent {
+  id: string;
+  drift_type: 'INPUT' | 'OUTPUT' | 'CLINICAL_DISCORDANCE';
+  severity: 'NORMAL' | 'WARNING' | 'CRITICAL';
+  model_version_id?: string;
+  metrics_json?: string;
+  details?: string;
+  created_at: string;
+}
+
+export interface ModelApproval {
+  id: string;
+  model_version_id: string;
+  approver_id: string;
+  approver_role: string;
+  decision: 'APPROVED' | 'REJECTED' | 'PENDING';
+  rationale?: string;
+  created_at: string;
+}
+
+export interface DeploymentRecord {
+  id: string;
+  model_version_id: string;
+  environment: string;
+  deployed_by: string;
+  status: 'ACTIVE' | 'ROLLED_BACK' | 'DEPLOYING';
+  previous_version_id?: string;
+  rollback_reason?: string;
+  deployed_at: string;
+}
+
+export interface ActiveLearningItem {
+  scan_id: string;
+  patient_id: string;
+  priority_score: number;
+  uncertainty_score: number;
+  confidence: number;
+  predicted_stage: number;
+  is_borderline: boolean;
+  is_rare_class: boolean;
+  is_ood_proximity: boolean;
+  reasons: string[];
+}
+

@@ -108,9 +108,25 @@ export const MedicalDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
     },
   ]);
 
-  const [activeView, setActiveView] = useState<ActiveView>('landing');
+  const [activeView, setActiveView] = useState<ActiveView>(() => {
+    if (typeof window !== 'undefined') {
+      const urlParams = new URLSearchParams(window.location.search);
+      // Intelligence Control Plane is strictly isolated to dedicated local port 3001
+      // On production deployments (Vercel / Cloud), only the Clinical Platform is served
+      if (
+        window.location.port === '3001' ||
+        (import.meta.env.DEV && (urlParams.get('view') === 'admin' || window.location.pathname.startsWith('/admin')))
+      ) {
+        return 'admin';
+      }
+    }
+    return 'landing';
+  });
   const [reportLanguage, setReportLanguage] = useState<ReportLanguage>('english');
   const [backendUrl, setBackendUrlState] = useState<string>(() => {
+    if (typeof window !== 'undefined' && window.location.port === '3001') {
+      return 'http://127.0.0.1:5001';
+    }
     return (
       (import.meta as any).env?.VITE_BACKEND_URL ||
       localStorage.getItem('DrishtiAI_backend_url') ||

@@ -1,4 +1,10 @@
-"""Role-Based Access Control (RBAC) and lightweight token authentication."""
+"""Role-Based Access Control (RBAC) and lightweight token authentication.
+
+Two authentication domains:
+  1. Clinical — ADMIN, DOCTOR, HEALTH_WORKER, PATIENT
+  2. Intelligence Control Plane — SUPER_ADMIN, ML_ENGINEER, DATA_STEWARD,
+     CLINICAL_REVIEWER, SECURITY_ADMIN, AUDITOR
+"""
 
 from __future__ import annotations
 
@@ -14,11 +20,31 @@ from flask import request, jsonify, g
 from config import FLASK_SECRET, EDGE_DEVICE_SECRET
 
 
+# ---------------------------------------------------------------------------
+# Clinical Roles (backward-compatible — unchanged)
+# ---------------------------------------------------------------------------
 class Role(str, Enum):
     ADMIN = "ADMIN"
     DOCTOR = "DOCTOR"
     HEALTH_WORKER = "HEALTH_WORKER"
     PATIENT = "PATIENT"
+
+
+# ---------------------------------------------------------------------------
+# Intelligence Control Plane Roles
+# ---------------------------------------------------------------------------
+class AdminRole(str, Enum):
+    """Roles for the DrishtiAI Intelligence Control Plane."""
+    SUPER_ADMIN = "SUPER_ADMIN"
+    ML_ENGINEER = "ML_ENGINEER"
+    DATA_STEWARD = "DATA_STEWARD"
+    CLINICAL_REVIEWER = "CLINICAL_REVIEWER"
+    SECURITY_ADMIN = "SECURITY_ADMIN"
+    AUDITOR = "AUDITOR"
+
+
+# Combined set for token validation
+_ALL_VALID_ROLES = {r.value for r in Role} | {r.value for r in AdminRole}
 
 
 def _b64_encode(data: bytes) -> str:
@@ -168,7 +194,7 @@ def get_current_actor() -> dict[str, Any] | None:
     edge_signature = request.headers.get("X-Drishti-Edge-Signature", "")
 
     if edge_device and edge_role and edge_timestamp_raw and edge_signature:
-        if edge_role in {r.value for r in Role}:
+        if edge_role in _ALL_VALID_ROLES:
             try:
                 edge_timestamp = int(edge_timestamp_raw)
                 if verify_edge_signature(edge_device, edge_role, edge_timestamp, edge_signature):
@@ -232,6 +258,7 @@ def verify_role_credentials(role: str, secret: str | None, user_id: str | None =
     - DOCTOR: requires DOCTOR_SECRET
     - HEALTH_WORKER: in production (non-demo), requires WORKER_SECRET; in demo/dev/test, permits synthetic accounts
     - PATIENT: verifies patient exists in database (or synthetic demo namespace)
+    - Intelligence Admin roles: requires ADMIN_SECRET (SUPER_ADMIN) or role-specific admin verification
     """
     from config import ADMIN_SECRET, DOCTOR_SECRET, WORKER_SECRET, ENVIRONMENT, DEMO_MODE as CONFIG_DEMO_MODE
     current_env = (env or ENVIRONMENT).lower()
@@ -266,5 +293,77 @@ def verify_role_credentials(role: str, secret: str | None, user_id: str | None =
         except Exception:
             return False
 
+    # Intelligence Control Plane admin roles
+    if role_clean in {r.value for r in AdminRole}:
+        admin_secret = _get_admin_plane_secret()
+        if role_clean == AdminRole.SUPER_ADMIN.value:
+            return bool(secret and hmac.compare_digest(str(secret), ADMIN_SECRET))
+        # Other admin roles: require admin plane secret or ADMIN_SECRET
+        if secret and (hmac.compare_digest(str(secret), admin_secret) or hmac.compare_digest(str(secret), ADMIN_SECRET)):
+            return True
+        # In demo mode, permit admin role logins for testing
+        if is_demo:
+            return True
+        return False
+
     return False
+
+
+def _get_admin_plane_secret() -> str:
+    """Get the Intelligence Control Plane secret, falling back to ADMIN_SECRET."""
+    import os
+    return os.getenv("INTELLIGENCE_ADMIN_SECRET", "") or _import_admin_secret()
+
+
+def _import_admin_secret() -> str:
+    from config import ADMIN_SECRET
+    return ADMIN_SECRET
+
+
+def require_admin_role(*allowed_roles: str | AdminRole) -> Callable:
+    """
+    Flask route decorator enforcing Intelligence Control Plane RBAC.
+    Example: @require_admin_role(AdminRole.ML_ENGINEER, AdminRole.SUPER_ADMIN)
+
+    A clinical ADMIN also has access to admin endpoints (implicit promotion).
+    """
+    normalized_allowed = {
+        r.value if isinstance(r, AdminRole) else str(r).upper() for r in allowed_roles
+    }
+    # Clinical ADMIN always has access to admin endpoints
+    normalized_allowed.add(Role.ADMIN.value)
+
+    def decorator(fn: Callable) -> Callable:
+        @wraps(fn)
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            actor = get_current_actor()
+            if not actor or not actor.get("actor_role"):
+                return jsonify({
+                    "success": False,
+                    "error": "Authentication required. Provide a valid Bearer token or signed edge credential."
+                }), 401
+
+            g.current_user = actor
+
+            if actor["actor_role"] not in normalized_allowed:
+                return jsonify({
+                    "success": False,
+                    "error": (
+                        f"Access forbidden: requires one of {sorted(list(normalized_allowed))}. "
+                        f"Current role: {actor['actor_role']}. "
+                        f"Intelligence Control Plane access requires an authorized admin role."
+                    )
+                }), 403
+
+            return fn(*args, **kwargs)
+        return wrapper
+    return decorator
+
+
+def create_admin_token(user_id: str, admin_role: str, expires_in_seconds: int = 43200) -> str:
+    """Generate an access token for Intelligence Control Plane admin roles (12h default)."""
+    role_clean = admin_role.upper()
+    if role_clean not in {r.value for r in AdminRole} and role_clean != Role.ADMIN.value:
+        raise ValueError(f"Invalid admin role: {admin_role}")
+    return create_access_token(user_id=user_id, role=role_clean, expires_in_seconds=expires_in_seconds)
 
