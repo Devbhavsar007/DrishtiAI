@@ -70,41 +70,41 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
     <div className="min-h-screen bg-[#619FE8] text-white flex flex-col font-sans selection:bg-[#E1FA4A] selection:text-black relative grain-overlay">
       {/* Top Clinical Header Bar */}
       <header
-        className="sticky top-0 z-40 w-full min-h-[72px] bg-[#619FE8]/85 backdrop-blur-2xl border-b border-white/10 text-white flex items-center shadow-sm"
+        className="sticky top-0 z-40 w-full min-h-[64px] sm:min-h-[72px] bg-[#619FE8]/85 backdrop-blur-2xl border-b border-white/10 text-white flex items-center shadow-sm pt-safe"
         role="region"
         aria-label="Intelligence Control Plane Header"
       >
-        <div className="w-full px-4 sm:px-8 py-2.5 flex flex-wrap items-center justify-between gap-4">
+        <div className="w-full px-3 sm:px-6 lg:px-8 py-2 flex flex-wrap items-center justify-between gap-2 sm:gap-4">
           {/* Brand & Suite Subtitle */}
-          <div className="flex items-center gap-3.5 select-none">
-            <div className="w-9 h-9 bg-sky-100 border border-sky-300 rounded-xl flex items-center justify-center shrink-0 shadow-sm">
-              <Eye className="w-5 h-5 text-[#1E54B7] stroke-[2]" />
+          <div className="flex items-center gap-2.5 sm:gap-3.5 select-none min-w-0">
+            <div className="w-8 h-8 sm:w-9 sm:h-9 bg-sky-100 border border-sky-300 rounded-xl flex items-center justify-center shrink-0 shadow-sm">
+              <Eye className="w-4 h-4 sm:w-5 sm:h-5 text-[#1E54B7] stroke-[2]" />
             </div>
-            <div className="flex flex-col">
-              <div className="flex items-center gap-2">
+            <div className="flex flex-col min-w-0">
+              <div className="flex items-center gap-1.5 sm:gap-2">
                 <span
-                  className="text-xl font-bold tracking-tight text-white"
+                  className="text-lg sm:text-xl font-bold tracking-tight text-white truncate"
                   style={{ fontFamily: 'var(--font-heading)' }}
                 >
                   DrishtiAI
                 </span>
-                <span className="inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md bg-[#E1FA4A] text-black shadow-sm">
-                  <Sparkles className="w-3 h-3" />
-                  MLOps Control Plane
+                <span className="inline-flex items-center gap-1 text-[9px] font-black uppercase tracking-wider px-1.5 sm:px-2 py-0.5 rounded-md bg-[#E1FA4A] text-black shadow-sm shrink-0">
+                  <Sparkles className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
+                  MLOps
                 </span>
               </div>
-              <span className="text-[10px] uppercase tracking-[0.12em] text-white/80 font-bold">
+              <span className="hidden sm:block text-[9px] uppercase tracking-[0.12em] text-white/80 font-bold truncate">
                 Model Lifecycle, Governance & Drift Telemetry
               </span>
             </div>
           </div>
 
           {/* Right Role Switcher & Back to Clinical Suite Action */}
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2 sm:gap-3 shrink-0">
             {/* Role Selector */}
-            <div className="flex items-center gap-2 bg-white/15 backdrop-blur-md border border-white/25 rounded-xl px-3 py-1.5 shadow-sm">
-              <SlidersHorizontal className="w-3.5 h-3.5 text-white/80" />
-              <span className="text-xs text-white/80 font-medium">Role:</span>
+            <div className="flex items-center gap-1.5 bg-white/15 backdrop-blur-md border border-white/25 rounded-xl px-2.5 sm:px-3 py-1 sm:py-1.5 shadow-sm">
+              <SlidersHorizontal className="w-3 h-3 text-white/80" />
+              <span className="hidden xs:inline text-xs text-white/80 font-medium">Role:</span>
               <select
                 value={adminRole}
                 aria-label="Active Administrative Role"
@@ -122,21 +122,51 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
             {/* Back to Clinical Workspace Button */}
             <button
               onClick={onExitAdmin}
-              className="flex items-center gap-1.5 px-4 h-9 rounded-xl font-bold text-xs uppercase tracking-wider bg-[#E1FA4A] hover:bg-[#d6f236] active:scale-95 text-black shadow-[0_2px_8px_rgba(22,163,74,0.25)] transition-all cursor-pointer btn-clinical"
+              className="flex items-center gap-1.5 px-3 sm:px-4 h-8 sm:h-9 rounded-xl font-bold text-xs uppercase tracking-wider bg-[#E1FA4A] hover:bg-[#d6f236] active:scale-95 text-black shadow-[0_2px_8px_rgba(22,163,74,0.25)] transition-all cursor-pointer btn-clinical shrink-0"
               title="Return to Clinical Screening Suite"
             >
               <ArrowLeft className="w-3.5 h-3.5 stroke-[2.5]" />
-              <span>Clinical Suite</span>
+              <span className="hidden xs:inline">Clinical Suite</span>
+              <span className="xs:hidden">Clinical</span>
             </button>
           </div>
         </div>
       </header>
 
+      {/* Mobile Horizontal Navigation Tab Bar (Swipable across all 9 planes) */}
+      <nav
+        className="md:hidden sticky top-[64px] sm:top-[72px] z-30 bg-[#1E54B7]/95 backdrop-blur-xl border-b border-white/20 px-3 py-2 flex items-center gap-2 overflow-x-auto no-scrollbar shadow-md"
+        aria-label="MLOps Planes Mobile Navigation"
+      >
+        {NAV_ITEMS.map((item) => {
+          const isActive = currentView === item.id;
+          return (
+            <button
+              key={item.id}
+              onClick={() => onSelectView(item.id)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all shrink-0 cursor-pointer ${
+                isActive
+                  ? 'bg-white text-[#1E54B7] shadow-md scale-105 font-black'
+                  : 'bg-white/10 text-white/80 hover:text-white hover:bg-white/20'
+              }`}
+            >
+              {item.icon}
+              <span>{item.label}</span>
+              {item.badge && (
+                <span className="ml-1 text-[9px] px-1.5 py-0.2 rounded-full font-mono bg-[#E1FA4A] text-black font-black">
+                  {item.badge}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </nav>
+
       {/* Primary Workspace: Sidebar + Main Views */}
       <div className="flex-1 flex flex-row relative">
-        {/* Desktop Sidebar (matching clinical Navigation.tsx) */}
+        {/* Desktop Sidebar (Responsive w-60 to w-64) */}
         <aside
-          className="hidden md:flex flex-col w-64 shrink-0 bg-white/10 backdrop-blur-2xl border-r border-white/15 min-h-[calc(100vh-72px)] p-4 gap-2 select-none text-white"
+          className="hidden md:flex flex-col w-60 lg:w-64 shrink-0 bg-white/10 backdrop-blur-2xl border-r border-white/15 min-h-[calc(100vh-72px)] p-4 gap-2 select-none text-white transition-all"
           aria-label="MLOps Navigation Menu"
         >
           <div className="space-y-1.5">

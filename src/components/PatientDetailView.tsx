@@ -120,10 +120,10 @@ export const PatientDetailView: React.FC = () => {
   return (
     <div className="space-y-6 sm:space-y-8 animate-fadeIn text-white">
       {/* Top Breadcrumb & Actions */}
-      <div className="flex flex-wrap items-center justify-between gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
         <button
           onClick={() => setActiveView('patients')}
-          className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-white/20 hover:bg-white/30 backdrop-blur-md border border-white/40 text-white font-bold text-xs uppercase tracking-wider transition-all cursor-pointer shadow-sm"
+          className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-full bg-white/20 hover:bg-white/30 backdrop-blur-md border border-white/40 text-white font-bold text-xs uppercase tracking-wider transition-all cursor-pointer shadow-sm self-start sm:self-auto"
         >
           <ArrowLeft className="w-4 h-4" />
           <span>Back to Directory</span>
@@ -131,7 +131,7 @@ export const PatientDetailView: React.FC = () => {
 
         <button
           onClick={handleStartScan}
-          className="inline-flex items-center gap-2 px-7 py-3.5 rounded-full bg-[#E1FA4A] hover:bg-[#d6f236] text-black font-black text-xs uppercase tracking-wider shadow-xl hover:scale-105 transition-all cursor-pointer"
+          className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 sm:px-7 py-3 sm:py-3.5 rounded-full bg-[#E1FA4A] hover:bg-[#d6f236] text-black font-black text-xs uppercase tracking-wider shadow-xl hover:scale-105 transition-all cursor-pointer"
         >
           <Microscope className="w-4 h-4" />
           <span>Perform New Scan for {activePatient.name.split(' ')[0]} ↗</span>
@@ -139,7 +139,7 @@ export const PatientDetailView: React.FC = () => {
       </div>
 
       {/* Patient Profile Hero Card */}
-      <div className="p-7 sm:p-8 bg-white text-black rounded-[36px] shadow-2xl border-4 border-white space-y-6">
+      <div className="p-5 sm:p-8 bg-white text-black rounded-3xl sm:rounded-[36px] shadow-2xl border-2 sm:border-4 border-white space-y-5 sm:space-y-6">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
           <div className="space-y-2">
             <div className="flex flex-wrap items-center gap-3">

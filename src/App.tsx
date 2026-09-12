@@ -38,7 +38,7 @@ const MainContent: React.FC = () => {
 
   return (
     <main
-      className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 pb-24 md:pb-12"
+      className="flex-1 max-w-7xl w-full mx-auto p-3.5 sm:p-6 lg:p-8 pb-32 sm:pb-36 md:pb-12"
       id="main-content"
       role="main"
       aria-label="Clinical AI Workspace"

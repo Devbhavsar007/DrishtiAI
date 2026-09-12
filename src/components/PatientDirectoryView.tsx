@@ -54,7 +54,7 @@ export const PatientDirectoryView: React.FC = () => {
   return (
     <div className="space-y-6 sm:space-y-8 animate-fadeIn text-white">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-7 bg-white text-black rounded-[36px] shadow-2xl border-4 border-white">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5 sm:p-7 bg-white text-black rounded-3xl sm:rounded-[36px] shadow-2xl border-2 sm:border-4 border-white">
         <div className="space-y-1">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-sky-100 text-[#1E54B7] text-xs font-black">
             <Users className="w-4 h-4" />
@@ -63,7 +63,7 @@ export const PatientDirectoryView: React.FC = () => {
           <h1 className="text-2xl sm:text-3xl font-extrabold text-black flex items-center gap-3 font-sans">
             Patient Records Directory
           </h1>
-          <p className="text-sm sm:text-base text-gray-600 font-medium">
+          <p className="text-xs sm:text-base text-gray-600 font-medium">
             Longitudinal diabetic ophthalmology profiles, scan histories, and HbA1c tracking
           </p>
         </div>
@@ -74,7 +74,7 @@ export const PatientDirectoryView: React.FC = () => {
             setActiveScan(null);
             setActiveView('new-scan');
           }}
-          className="flex items-center gap-2 px-7 py-3.5 rounded-full bg-[#E1FA4A] hover:bg-[#d6f236] text-black font-black text-xs uppercase tracking-wider shadow-lg hover:scale-105 transition-all shrink-0 min-h-[48px] cursor-pointer"
+          className="w-full sm:w-auto flex items-center justify-center gap-2 px-5 sm:px-7 py-3 sm:py-3.5 rounded-full bg-[#E1FA4A] hover:bg-[#d6f236] text-black font-black text-xs uppercase tracking-wider shadow-lg hover:scale-105 transition-all shrink-0 min-h-[46px] cursor-pointer"
         >
           <UserPlus className="w-4 h-4" />
           <span>Register &amp; Scan Patient</span>
@@ -82,8 +82,8 @@ export const PatientDirectoryView: React.FC = () => {
       </div>
 
       {/* Search & Filter Bar */}
-      <div className="p-7 bg-white text-black rounded-[36px] space-y-6 shadow-2xl border-4 border-white">
-        <div className="flex flex-col md:flex-row gap-4">
+      <div className="p-5 sm:p-7 bg-white text-black rounded-3xl sm:rounded-[36px] space-y-5 sm:space-y-6 shadow-2xl border-2 sm:border-4 border-white">
+        <div className="flex flex-col md:flex-row gap-3 sm:gap-4">
           <div className="relative flex-1">
             <Search className="absolute left-4 top-3.5 w-5 h-5 text-gray-400" />
             <input
@@ -95,11 +95,11 @@ export const PatientDirectoryView: React.FC = () => {
             />
           </div>
 
-          {/* Filter Chips */}
-          <div className="flex flex-wrap items-center gap-2">
+          {/* Filter Chips (Horizontal Swipe on Mobile) */}
+          <div className="flex items-center gap-2 overflow-x-auto no-scrollbar py-1 touch-momentum -mx-1 px-1">
             <button
               onClick={() => setFilter('all')}
-              className={`px-4 py-2.5 rounded-full text-xs font-black transition-all cursor-pointer ${
+              className={`px-3.5 sm:px-4 py-2 sm:py-2.5 rounded-full text-xs font-black whitespace-nowrap transition-all cursor-pointer shrink-0 ${
                 filter === 'all'
                   ? 'bg-black text-white shadow-md'
                   : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
@@ -109,7 +109,7 @@ export const PatientDirectoryView: React.FC = () => {
             </button>
             <button
               onClick={() => setFilter('no-dr')}
-              className={`inline-flex items-center gap-1.5 px-4 py-2.5 rounded-full text-xs font-black transition-all cursor-pointer ${
+              className={`inline-flex items-center gap-1.5 px-3.5 sm:px-4 py-2 sm:py-2.5 rounded-full text-xs font-black whitespace-nowrap transition-all cursor-pointer shrink-0 ${
                 filter === 'no-dr'
                   ? 'bg-[#009E73] text-white shadow-md'
                   : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100'
@@ -120,7 +120,7 @@ export const PatientDirectoryView: React.FC = () => {
             </button>
             <button
               onClick={() => setFilter('mild-mod')}
-              className={`inline-flex items-center gap-1.5 px-4 py-2.5 rounded-full text-xs font-black transition-all cursor-pointer ${
+              className={`inline-flex items-center gap-1.5 px-3.5 sm:px-4 py-2 sm:py-2.5 rounded-full text-xs font-black whitespace-nowrap transition-all cursor-pointer shrink-0 ${
                 filter === 'mild-mod'
                   ? 'bg-[#E69F00] text-black shadow-md'
                   : 'bg-amber-50 text-amber-900 hover:bg-amber-100'
@@ -131,7 +131,7 @@ export const PatientDirectoryView: React.FC = () => {
             </button>
             <button
               onClick={() => setFilter('high-risk')}
-              className={`inline-flex items-center gap-1.5 px-4 py-2.5 rounded-full text-xs font-black transition-all cursor-pointer ${
+              className={`inline-flex items-center gap-1.5 px-3.5 sm:px-4 py-2 sm:py-2.5 rounded-full text-xs font-black whitespace-nowrap transition-all cursor-pointer shrink-0 ${
                 filter === 'high-risk'
                   ? 'bg-[#D55E00] text-white shadow-md'
                   : 'bg-rose-50 text-rose-900 hover:bg-rose-100'

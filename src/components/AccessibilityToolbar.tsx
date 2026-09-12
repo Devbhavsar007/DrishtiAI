@@ -61,50 +61,50 @@ export const AccessibilityToolbar: React.FC = () => {
   return (
     <>
       <header
-        className="sticky top-0 z-40 w-full min-h-[72px] bg-[#619FE8]/80 backdrop-blur-2xl border-b border-white/8 text-white flex items-center transition-all"
+        className="sticky top-0 z-40 w-full min-h-[64px] sm:min-h-[72px] bg-[#619FE8]/85 backdrop-blur-2xl border-b border-white/10 text-white flex items-center transition-all pt-safe"
         role="region"
         aria-label="Accessibility and Primary Toolbar"
       >
-        <div className="w-full px-4 sm:px-8 py-2.5 flex flex-wrap items-center justify-between gap-4">
+        <div className="w-full px-3 sm:px-6 lg:px-8 py-2 flex items-center justify-between gap-2 sm:gap-4">
           {/* Brand & Suite Subtitle */}
           <div
             onClick={() => setActiveView(activeView === 'landing' ? 'dashboard' : 'landing')}
-            className="flex items-center gap-3.5 cursor-pointer group select-none"
+            className="flex items-center gap-2.5 sm:gap-3.5 cursor-pointer group select-none min-w-0"
             title="Click to view Product Landing Page"
           >
-            <div className="w-9 h-9 bg-sky-100 border border-sky-300 group-hover:scale-105 rounded-xl flex items-center justify-center shrink-0 transition-transform">
-              <Eye className="w-4.5 h-4.5 text-[#1E54B7] stroke-[2]" />
+            <div className="w-8 h-8 sm:w-9 sm:h-9 bg-sky-100 border border-sky-300 group-hover:scale-105 rounded-xl flex items-center justify-center shrink-0 transition-transform shadow-sm">
+              <Eye className="w-4 h-4 sm:w-4.5 sm:h-4.5 text-[#1E54B7] stroke-[2]" />
             </div>
-            <div className="flex flex-col">
-              <div className="flex items-center gap-2">
-                <span className="text-xl font-bold tracking-tight text-white" style={{ fontFamily: 'var(--font-heading)' }}>
+            <div className="flex flex-col min-w-0">
+              <div className="flex items-center gap-1.5 sm:gap-2">
+                <span className="text-lg sm:text-xl font-bold tracking-tight text-white truncate" style={{ fontFamily: 'var(--font-heading)' }}>
                   DrishtiAI
                 </span>
-                <span className="inline-flex items-center gap-1 text-[9px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-md bg-sky-100 text-[#22D3EE] border border-sky-200">
+                <span className="inline-flex items-center gap-1 text-[8px] sm:text-[9px] font-semibold uppercase tracking-wider px-1.5 sm:px-2 py-0.5 rounded-md bg-sky-100 text-[#22D3EE] border border-sky-200 shrink-0">
                   <Sparkles className="w-2.5 h-2.5" />
                   Gemma-4
                 </span>
               </div>
-              <span className="text-[9px] uppercase tracking-[0.12em] text-white/40 font-medium">
+              <span className="hidden sm:block text-[9px] uppercase tracking-[0.12em] text-white/60 font-medium truncate">
                 Diabetic Retinopathy Clinical Suite
               </span>
             </div>
           </div>
 
           {/* Right-Aligned Accessibility & Mode Controls */}
-          <div className="flex flex-wrap items-center gap-2.5">
+          <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
             {/* Font Scale Switcher: [STD] [A+] [A++] */}
             <div
-              className="flex bg-white/8 backdrop-blur-md rounded-lg border border-white/10 p-0.5"
+              className="flex bg-white/10 backdrop-blur-md rounded-lg border border-white/15 p-0.5"
               role="group"
               aria-label="Font size scaling"
             >
               <button
                 onClick={() => setFontSize('standard')}
-                className={`px-3 py-1 text-xs font-black rounded-full transition-all cursor-pointer ${
+                className={`px-2 sm:px-3 py-1 text-[10px] sm:text-xs font-black rounded-md transition-all cursor-pointer ${
                   fontSize === 'standard'
                     ? 'bg-[#1E54B7] text-white shadow-sm'
-                    : 'text-white/60 font-medium hover:text-white hover:bg-white/10'
+                    : 'text-white/70 font-medium hover:text-white hover:bg-white/10'
                 }`}
                 aria-pressed={fontSize === 'standard'}
                 title="Standard Text Size"
@@ -113,10 +113,10 @@ export const AccessibilityToolbar: React.FC = () => {
               </button>
               <button
                 onClick={() => setFontSize('large')}
-                className={`px-3 py-1 text-xs font-black rounded-full transition-all cursor-pointer ${
+                className={`px-2 sm:px-3 py-1 text-[10px] sm:text-xs font-black rounded-md transition-all cursor-pointer ${
                   fontSize === 'large'
                     ? 'bg-[#1E54B7] text-white shadow-sm'
-                    : 'text-white/60 font-medium hover:text-white hover:bg-white/10'
+                    : 'text-white/70 font-medium hover:text-white hover:bg-white/10'
                 }`}
                 aria-pressed={fontSize === 'large'}
                 title="Large Text Size (A+)"
@@ -125,10 +125,10 @@ export const AccessibilityToolbar: React.FC = () => {
               </button>
               <button
                 onClick={() => setFontSize('xlarge')}
-                className={`px-3 py-1 text-xs font-black rounded-full transition-all cursor-pointer ${
+                className={`px-2 sm:px-3 py-1 text-[10px] sm:text-xs font-black rounded-md transition-all cursor-pointer ${
                   fontSize === 'xlarge'
                     ? 'bg-[#1E54B7] text-white shadow-sm'
-                    : 'text-white/60 font-medium hover:text-white hover:bg-white/10'
+                    : 'text-white/70 font-medium hover:text-white hover:bg-white/10'
                 }`}
                 aria-pressed={fontSize === 'xlarge'}
                 title="Extra Large Text Size (A++)"
@@ -140,22 +140,22 @@ export const AccessibilityToolbar: React.FC = () => {
             {/* High Contrast Mode Toggle */}
             <button
               onClick={toggleContrast}
-              className={`flex items-center gap-1.5 px-3 h-9 rounded-lg font-semibold text-[11px] uppercase tracking-wider transition-all cursor-pointer btn-clinical ${
+              className={`flex items-center justify-center gap-1 px-2.5 sm:px-3 h-8 sm:h-9 rounded-lg font-semibold text-[11px] uppercase tracking-wider transition-all cursor-pointer btn-clinical ${
                 highContrast
                   ? 'bg-amber-400 text-black border border-amber-500'
-                  : 'bg-white/8 hover:bg-white/15 border border-white/10 text-white/70'
+                  : 'bg-white/10 hover:bg-white/15 border border-white/15 text-white/80'
               }`}
               aria-pressed={highContrast}
               title="Toggle High Contrast Mode"
             >
               <Contrast className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Contrast</span>
+              <span className="hidden md:inline">Contrast</span>
             </button>
 
             {/* Read Screen Speech Synthesizer Button */}
             <button
               onClick={handleReadScreen}
-              className={`flex items-center gap-2 px-4 sm:px-5 h-9 rounded-lg font-semibold text-[11px] uppercase tracking-wider btn-clinical cursor-pointer ${
+              className={`flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-4 h-8 sm:h-9 rounded-lg font-bold text-[10px] sm:text-[11px] uppercase tracking-wider btn-clinical cursor-pointer ${
                 isSpeaking
                   ? 'bg-[#DC2626] text-white animate-pulse'
                   : 'bg-[#E1FA4A] hover:bg-[#d6f236] text-black shadow-[0_2px_8px_rgba(22,163,74,0.3)]'
@@ -166,12 +166,12 @@ export const AccessibilityToolbar: React.FC = () => {
               {isSpeaking ? (
                 <>
                   <VolumeX className="w-3.5 h-3.5" />
-                  <span>Stop</span>
+                  <span className="hidden xs:inline">Stop</span>
                 </>
               ) : (
                 <>
                   <Volume2 className="w-3.5 h-3.5" />
-                  <span>Read Screen</span>
+                  <span className="hidden xs:inline">Read Screen</span>
                 </>
               )}
             </button>
@@ -179,11 +179,11 @@ export const AccessibilityToolbar: React.FC = () => {
             {/* Settings Opener */}
             <button
               onClick={() => setIsSettingsOpen(true)}
-              className="flex items-center justify-center w-9 h-9 rounded-lg bg-white/8 hover:bg-white/15 border border-white/10 text-white/60 hover:text-white transition-all cursor-pointer btn-clinical"
+              className="flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 rounded-lg bg-white/10 hover:bg-white/20 border border-white/15 text-white/80 hover:text-white transition-all cursor-pointer btn-clinical"
               title="Backend & AI Settings"
               aria-label="Backend Connection Settings"
             >
-              <Settings className="w-4 h-4" />
+              <Settings className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
             </button>
           </div>
         </div>

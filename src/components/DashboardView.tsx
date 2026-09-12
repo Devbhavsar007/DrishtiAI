@@ -45,17 +45,13 @@ export const DashboardView: React.FC = () => {
 
   return (
     <div className="space-y-6 sm:space-y-8 animate-fadeIn text-white">
-      {/* 1. Header with CTA */}
-      <header className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
-        <div className="space-y-1.5">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/10 backdrop-blur-md border border-white/15 text-xs font-medium text-white/90">
-            <span className="w-1.5 h-1.5 rounded-full bg-[#E1FA4A] animate-pulse"></span>
-            <span>Live Clinical Triage • Active Screening Center</span>
-          </div>
-          <h1 className="text-3xl sm:text-4xl font-bold tracking-tight text-white" style={{ fontFamily: 'var(--font-heading)' }}>
+      {/* 1. Header Banner & Quick Action */}
+      <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl sm:text-4xl font-bold tracking-tight text-white" style={{ fontFamily: 'var(--font-heading)' }}>
             Clinical Overview
           </h1>
-          <p className="text-white/70 text-sm sm:text-base font-normal max-w-2xl">
+          <p className="text-white/80 text-xs sm:text-base font-normal max-w-2xl mt-0.5">
             Real-time screening metrics, microvascular risk distribution, and urgent ophthalmology triage queue.
           </p>
         </div>
@@ -65,7 +61,7 @@ export const DashboardView: React.FC = () => {
             setActiveScan(null);
             setActiveView('new-scan');
           }}
-          className="bg-[#E1FA4A] hover:bg-[#d6f236] text-black px-6 sm:px-8 h-11 sm:h-12 rounded-xl font-semibold text-sm flex items-center justify-center gap-2.5 btn-clinical shrink-0 cursor-pointer shadow-[0_4px_12px_rgba(22,163,74,0.25)] focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#E1FA4A]"
+          className="bg-[#E1FA4A] hover:bg-[#d6f236] text-black px-6 sm:px-8 h-11 sm:h-12 rounded-xl font-semibold text-sm flex items-center justify-center gap-2.5 btn-clinical shrink-0 cursor-pointer shadow-[0_4px_12px_rgba(22,163,74,0.25)] focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#E1FA4A] w-full sm:w-auto"
           aria-label="Start new retinal scan analysis"
         >
           <Microscope className="w-4.5 h-4.5 stroke-[2]" />
@@ -74,9 +70,9 @@ export const DashboardView: React.FC = () => {
       </header>
 
       {/* 2. Key Metrics Row (4 Enamel White Cards) */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4" data-reveal-stagger>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5 sm:gap-4" data-reveal-stagger>
         {/* Card 1: Total Patients Screened */}
-        <div className="bg-white text-black rounded-[36px] p-6 shadow-2xl border-4 border-white flex flex-col justify-between hover:scale-[1.02] transition-all">
+        <div className="bg-white text-black rounded-3xl sm:rounded-[36px] p-5 sm:p-6 shadow-2xl border-2 sm:border-4 border-white flex flex-col justify-between hover:scale-[1.01] transition-all">
           <div>
             <div className="flex items-center justify-between">
               <p className="text-gray-500 font-bold text-xs uppercase tracking-wider">
@@ -86,7 +82,7 @@ export const DashboardView: React.FC = () => {
                 <Users className="w-4 h-4" />
               </span>
             </div>
-            <p className="text-4xl font-extrabold font-mono text-black mt-3 animate-count-up">
+            <p className="text-3xl sm:text-4xl font-extrabold font-mono text-black mt-3 animate-count-up">
               {dashboardStats.total_patients.toLocaleString()}
             </p>
           </div>
@@ -97,7 +93,7 @@ export const DashboardView: React.FC = () => {
         </div>
 
         {/* Card 2: High Risk Cases (Stage 2+) */}
-        <div className="bg-white text-black rounded-[36px] p-6 shadow-2xl border-4 border-white relative overflow-hidden flex flex-col justify-between hover:scale-[1.02] transition-all">
+        <div className="bg-white text-black rounded-3xl sm:rounded-[36px] p-5 sm:p-6 shadow-2xl border-2 sm:border-4 border-white relative overflow-hidden flex flex-col justify-between hover:scale-[1.01] transition-all">
           <div className="absolute top-4 right-4 flex items-center gap-1 px-2.5 py-1 rounded-full bg-rose-100 text-rose-700 text-[10px] font-black uppercase tracking-wide">
             <span className="w-1.5 h-1.5 bg-rose-600 rounded-full animate-pulse"></span>
             <span>Urgent</span>
@@ -106,7 +102,7 @@ export const DashboardView: React.FC = () => {
             <p className="text-gray-500 font-bold text-xs uppercase tracking-wider">
               High Risk Cases
             </p>
-            <p className="text-4xl font-extrabold font-mono text-[#D55E00] mt-3 animate-count-up">
+            <p className="text-3xl sm:text-4xl font-extrabold font-mono text-[#D55E00] mt-3 animate-count-up">
               {dashboardStats.high_risk_cases}
             </p>
           </div>
@@ -117,7 +113,7 @@ export const DashboardView: React.FC = () => {
         </div>
 
         {/* Card 3: Referrals Pending */}
-        <div className="bg-white text-black rounded-[36px] p-6 shadow-2xl border-4 border-white flex flex-col justify-between hover:scale-[1.02] transition-all">
+        <div className="bg-white text-black rounded-3xl sm:rounded-[36px] p-5 sm:p-6 shadow-2xl border-2 sm:border-4 border-white flex flex-col justify-between hover:scale-[1.01] transition-all">
           <div>
             <div className="flex items-center justify-between">
               <p className="text-gray-500 font-bold text-xs uppercase tracking-wider">
@@ -127,7 +123,7 @@ export const DashboardView: React.FC = () => {
                 <Hospital className="w-4 h-4" />
               </span>
             </div>
-            <p className="text-4xl font-extrabold font-mono text-black mt-3 animate-count-up">
+            <p className="text-3xl sm:text-4xl font-extrabold font-mono text-black mt-3 animate-count-up">
               {dashboardStats.referrals_needed}
             </p>
           </div>
@@ -137,7 +133,7 @@ export const DashboardView: React.FC = () => {
         </div>
 
         {/* Card 4: AI Accuracy */}
-        <div className="bg-white text-black rounded-[36px] p-6 shadow-2xl border-4 border-white flex flex-col justify-between hover:scale-[1.02] transition-all">
+        <div className="bg-white text-black rounded-3xl sm:rounded-[36px] p-5 sm:p-6 shadow-2xl border-2 sm:border-4 border-white flex flex-col justify-between hover:scale-[1.01] transition-all">
           <div>
             <div className="flex items-center justify-between">
               <p className="text-gray-500 font-bold text-xs uppercase tracking-wider">
@@ -147,7 +143,7 @@ export const DashboardView: React.FC = () => {
                 <Target className="w-4 h-4" />
               </span>
             </div>
-            <p className="text-4xl font-extrabold font-mono text-[#009E73] mt-3 animate-count-up">
+            <p className="text-3xl sm:text-4xl font-extrabold font-mono text-[#009E73] mt-3 animate-count-up">
               {dashboardStats.diagnostic_accuracy}%
             </p>
           </div>
@@ -158,16 +154,16 @@ export const DashboardView: React.FC = () => {
       </div>
 
       {/* 3. Stage Distribution & Recent Scans Side-by-Side */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 sm:gap-6">
         {/* DR Stage Distribution */}
-        <div className="lg:col-span-5 bg-white text-black rounded-[36px] p-7 shadow-2xl border-4 border-white flex flex-col justify-between space-y-6">
+        <div className="lg:col-span-5 bg-white text-black rounded-3xl sm:rounded-[36px] p-5 sm:p-7 shadow-2xl border-2 sm:border-4 border-white flex flex-col justify-between space-y-6">
           <div>
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2.5">
                 <div className="w-8 h-8 rounded-full bg-sky-100 flex items-center justify-center text-[#1E54B7]">
                   <Eye className="w-4 h-4 stroke-[2.5]" />
                 </div>
-                <h2 className="text-xl font-bold text-black font-sans">
+                <h2 className="text-lg sm:text-xl font-bold text-black font-sans">
                   DR Stage Distribution
                 </h2>
               </div>
@@ -241,13 +237,13 @@ export const DashboardView: React.FC = () => {
         </div>
 
         {/* Recent Patient Scans Table */}
-        <div className="lg:col-span-7 bg-white text-black rounded-[36px] p-7 shadow-2xl border-4 border-white flex flex-col space-y-6">
+        <div className="lg:col-span-7 bg-white text-black rounded-3xl sm:rounded-[36px] p-5 sm:p-7 shadow-2xl border-2 sm:border-4 border-white flex flex-col space-y-6">
           <div className="flex justify-between items-center">
             <div className="flex items-center gap-2.5">
               <div className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-700">
                 <Target className="w-4 h-4 stroke-[2.5]" />
               </div>
-              <h2 className="text-xl font-bold text-black">
+              <h2 className="text-lg sm:text-xl font-bold text-black">
                 Recent Patient Scans
               </h2>
             </div>
@@ -260,8 +256,8 @@ export const DashboardView: React.FC = () => {
             </button>
           </div>
 
-          <div className="flex-1 overflow-x-auto">
-            <table className="w-full text-left border-collapse">
+          <div className="flex-1 overflow-x-auto touch-momentum no-scrollbar">
+            <table className="w-full text-left border-collapse min-w-[480px]">
               <thead>
                 <tr className="bg-gray-100/80 text-gray-700 text-[11px] font-black uppercase tracking-wider">
                   <th className="px-4 py-3 rounded-l-xl">Patient Name</th>

@@ -306,7 +306,7 @@ export const NewScanView: React.FC = () => {
       {!activeScan && !isAnalyzing && (
         <div className="space-y-6 sm:space-y-8 animate-fadeIn text-white">
           {/* Header */}
-          <div className="p-7 bg-white text-black rounded-[36px] shadow-2xl border-4 border-white space-y-1">
+          <div className="p-5 sm:p-7 bg-white text-black rounded-3xl sm:rounded-[36px] shadow-2xl border-2 sm:border-4 border-white space-y-1">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-sky-100 text-[#1E54B7] text-xs font-black mb-1">
               <Microscope className="w-4 h-4" />
               <span>Multi-Modal AI Pipeline</span>
@@ -314,35 +314,35 @@ export const NewScanView: React.FC = () => {
             <h1 className="text-2xl sm:text-4xl font-extrabold text-black flex items-center gap-3 font-sans">
               New Retinal Scan & AI Analysis
             </h1>
-            <p className="text-sm sm:text-base text-gray-600 font-medium">
+            <p className="text-xs sm:text-base text-gray-600 font-medium">
               Instant Diabetic Retinopathy screening with EfficientNet-B3, Grad-CAM explainability, and Gemma-4
             </p>
           </div>
 
           {/* STEP 1: Patient Assignment */}
-          <div className="p-7 sm:p-8 bg-white text-black rounded-[36px] shadow-2xl border-4 border-white space-y-6">
-            <div className="flex items-center justify-between">
-              <h2 className="text-xl sm:text-2xl font-bold text-black flex items-center gap-3 font-sans">
-                <span className="flex items-center justify-center w-8 h-8 rounded-full bg-[#1E54B7] text-white text-sm font-black">
+          <div className="p-5 sm:p-8 bg-white text-black rounded-3xl sm:rounded-[36px] shadow-2xl border-2 sm:border-4 border-white space-y-5 sm:space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <h2 className="text-lg sm:text-2xl font-bold text-black flex items-center gap-2.5 sm:gap-3 font-sans">
+                <span className="flex items-center justify-center w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-[#1E54B7] text-white text-xs sm:text-sm font-black">
                   1
                 </span>
                 Step 1: Patient Assignment
               </h2>
 
               {activePatient && (
-                <div className="hidden sm:inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-emerald-100 text-emerald-900 border border-emerald-200 text-xs font-black">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-700" />
+                <div className="inline-flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-1.5 rounded-full bg-emerald-100 text-emerald-900 border border-emerald-200 text-xs font-black self-start sm:self-auto">
+                  <CheckCircle2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-emerald-700" />
                   <span>Assigned: {activePatient.name} ({activePatient.id})</span>
                 </div>
               )}
             </div>
 
             {/* Accessible Mode Tabs */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 p-1.5 bg-gray-100 rounded-full border border-gray-200">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 p-1.5 bg-gray-100 rounded-2xl sm:rounded-full border border-gray-200">
               <button
                 type="button"
                 onClick={() => setPatientMode('existing')}
-                className={`flex items-center justify-center gap-2 py-3 px-4 rounded-full font-black text-xs uppercase tracking-wider transition-all min-h-[44px] cursor-pointer ${
+                className={`flex items-center justify-center gap-2 py-2.5 sm:py-3 px-4 rounded-xl sm:rounded-full font-black text-xs uppercase tracking-wider transition-all min-h-[44px] cursor-pointer ${
                   patientMode === 'existing'
                     ? 'bg-black text-white shadow-md'
                     : 'text-gray-600 hover:text-black hover:bg-gray-200/60'
@@ -355,7 +355,7 @@ export const NewScanView: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setPatientMode('new')}
-                className={`flex items-center justify-center gap-2 py-3 px-4 rounded-full font-black text-xs uppercase tracking-wider transition-all min-h-[44px] cursor-pointer ${
+                className={`flex items-center justify-center gap-2 py-2.5 sm:py-3 px-4 rounded-xl sm:rounded-full font-black text-xs uppercase tracking-wider transition-all min-h-[44px] cursor-pointer ${
                   patientMode === 'new'
                     ? 'bg-black text-white shadow-md'
                     : 'text-gray-600 hover:text-black hover:bg-gray-200/60'
@@ -368,7 +368,7 @@ export const NewScanView: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setPatientMode('quick')}
-                className={`flex items-center justify-center gap-2 py-3 px-4 rounded-full font-black text-xs uppercase tracking-wider transition-all min-h-[44px] cursor-pointer ${
+                className={`flex items-center justify-center gap-2 py-2.5 sm:py-3 px-4 rounded-xl sm:rounded-full font-black text-xs uppercase tracking-wider transition-all min-h-[44px] cursor-pointer ${
                   patientMode === 'quick'
                     ? 'bg-black text-white shadow-md'
                     : 'text-gray-600 hover:text-black hover:bg-gray-200/60'
@@ -542,9 +542,9 @@ export const NewScanView: React.FC = () => {
           </div>
 
           {/* STEP 2: Fundus Image Upload & Presets */}
-          <div className="p-7 sm:p-8 bg-white text-black rounded-[36px] shadow-2xl border-4 border-white space-y-6">
-            <h2 className="text-xl sm:text-2xl font-bold text-black flex items-center gap-3 font-sans">
-              <span className="flex items-center justify-center w-8 h-8 rounded-full bg-[#1E54B7] text-white text-sm font-black">
+          <div className="p-5 sm:p-8 bg-white text-black rounded-3xl sm:rounded-[36px] shadow-2xl border-2 sm:border-4 border-white space-y-5 sm:space-y-6">
+            <h2 className="text-lg sm:text-2xl font-bold text-black flex items-center gap-2.5 sm:gap-3 font-sans">
+              <span className="flex items-center justify-center w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-[#1E54B7] text-white text-xs sm:text-sm font-black">
                 2
               </span>
               Step 2: Retinal Fundus Image
@@ -561,7 +561,7 @@ export const NewScanView: React.FC = () => {
                 </span>
               </div>
 
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-3.5">
                 {PRESET_FUNDUS_CASES.map((preset) => {
                   const isSelected = selectedPreset?.id === preset.id;
                   const meta = DR_STAGES[preset.stage];
@@ -570,7 +570,7 @@ export const NewScanView: React.FC = () => {
                       key={preset.id}
                       type="button"
                       onClick={() => handleSelectPreset(preset)}
-                      className={`p-3.5 rounded-2xl border-2 text-left transition-all relative overflow-hidden cursor-pointer ${
+                      className={`p-3 sm:p-3.5 rounded-2xl border-2 text-left transition-all relative overflow-hidden cursor-pointer ${
                         isSelected
                           ? 'bg-sky-50/80 border-[#1E54B7] shadow-lg ring-2 ring-sky-100 scale-[1.02]'
                           : 'bg-gray-50 border-gray-200 hover:border-gray-300 hover:bg-white'
@@ -583,53 +583,51 @@ export const NewScanView: React.FC = () => {
                           className="w-full h-full object-cover"
                         />
                       </div>
-                      <div className="text-xs font-bold text-black truncate">
-                        {preset.patientName}
-                      </div>
-                      <div className="flex items-center gap-1.5 mt-1">
+                      <div className="flex items-center justify-between gap-1 mb-1">
                         <span
-                          className="w-3.5 h-3.5 rounded-full text-[9px] font-black text-white flex items-center justify-center shrink-0"
+                          className="text-[10px] font-black uppercase px-2 py-0.5 rounded text-white shadow-sm truncate"
                           style={{ backgroundColor: meta.color }}
                         >
-                          {meta.icon}
+                          {meta.name}
                         </span>
-                        <span className="text-[11px] font-bold text-gray-700 truncate">
-                          {meta.shortName}
+                        <span className="text-[10px] font-mono font-bold text-gray-600">
+                          Stage {preset.stage}
                         </span>
                       </div>
+                      <p className="text-xs font-bold text-gray-900 truncate">
+                        {preset.clinicalNote}
+                      </p>
+                      <p className="text-[10px] text-gray-500 font-mono mt-0.5">
+                        {preset.samplePatientAge}y • HbA1c {preset.hba1c}%
+                      </p>
                     </button>
                   );
                 })}
               </div>
             </div>
 
-            {/* Drag & Drop Dropzone */}
+            {/* Custom File Upload Area */}
             <div
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={handleDrop}
               onClick={() => fileInputRef.current?.click()}
-              className="relative p-8 border-2 border-dashed border-gray-300 hover:border-[#1E54B7] rounded-3xl bg-gray-50 text-center cursor-pointer transition-all hover:bg-sky-50/50 group min-h-[190px] flex flex-col items-center justify-center space-y-3"
-              role="button"
-              tabIndex={0}
-              aria-label="Upload retinal fundus image"
+              className="border-2 border-dashed border-gray-300 hover:border-[#1E54B7] rounded-3xl p-6 sm:p-8 text-center cursor-pointer transition-all bg-gray-50/70 hover:bg-sky-50/50 flex flex-col items-center justify-center gap-3 group"
             >
               <input
                 ref={fileInputRef}
                 type="file"
-                accept="image/png,image/jpeg,image/jpg,image/tiff"
+                accept="image/*"
                 onChange={handleFileChange}
                 className="hidden"
               />
 
-              <div className="p-4 rounded-2xl bg-white border border-gray-200 text-[#1E54B7] shadow-sm group-hover:scale-110 transition-transform">
-                <Upload className="w-7 h-7" />
+              <div className="p-3.5 sm:p-4 rounded-2xl bg-white border border-gray-200 text-[#1E54B7] shadow-sm group-hover:scale-110 transition-transform">
+                <Upload className="w-6 h-6 sm:w-7 sm:h-7" />
               </div>
 
               <div>
-                <p className="text-base sm:text-lg font-bold text-black">
+                <p className="text-sm sm:text-lg font-bold text-black">
                   Drop retinal fundus image here, or click to browse
                 </p>
-                <p className="text-xs text-gray-500 mt-1 font-medium">
+                <p className="text-[11px] sm:text-xs text-gray-500 mt-1 font-medium">
                   Supports PNG, JPG, JPEG, TIFF (DICOM compliant up to 20MB)
                 </p>
               </div>
@@ -652,7 +650,7 @@ export const NewScanView: React.FC = () => {
                   Operator Verified • Landmark Gate: Enforced
                 </span>
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 sm:gap-3">
                 <button
                   type="button"
                   onClick={() => setSelectedEye('OD')}
@@ -850,11 +848,11 @@ export const NewScanView: React.FC = () => {
         <div className="space-y-6 sm:space-y-8 animate-fadeIn text-white">
           {/* 1. TOP HERO DIAGNOSTIC SUMMARY BANNER */}
           <div
-            className="p-7 sm:p-8 rounded-[36px] border-4 border-white shadow-2xl relative overflow-hidden space-y-6 bg-white text-black"
+            className="p-5 sm:p-8 rounded-3xl sm:rounded-[36px] border-2 sm:border-4 border-white shadow-2xl relative overflow-hidden space-y-5 sm:space-y-6 bg-white text-black"
           >
-            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-5 sm:gap-6">
               {/* Left: Large Circular Severity Badge */}
-              <div className="flex items-center gap-5">
+              <div className="flex flex-col xs:flex-row xs:items-center gap-4 sm:gap-5">
                 {(() => {
                   const isVerified = activeScan.safety_state === 'VERIFIED';
                   const isHardFailure = ['REJECTED', 'BLOCKED', 'ANATOMY_FAILED', 'QUALITY_FAILED', 'MODEL_FAILURE', 'RECOVERY_REQUIRED'].includes(activeScan.safety_state || '');
@@ -874,13 +872,13 @@ export const NewScanView: React.FC = () => {
 
                   return (
                     <div
-                      className="flex flex-col items-center justify-center w-20 h-20 sm:w-24 sm:h-24 rounded-3xl shadow-xl text-white font-black shrink-0 border-4 border-white"
+                      className="flex flex-col items-center justify-center w-18 h-18 sm:w-24 sm:h-24 rounded-2xl sm:rounded-3xl shadow-xl text-white font-black shrink-0 border-2 sm:border-4 border-white self-start xs:self-auto"
                       style={{ backgroundColor: badgeColor }}
                     >
-                      <span className="text-2xl sm:text-3xl">
+                      <span className="text-xl sm:text-3xl">
                         {stageIcon}
                       </span>
-                      <span className="text-[10px] sm:text-xs uppercase tracking-wider font-mono text-center px-1 truncate max-w-full">
+                      <span className="text-[9px] sm:text-xs uppercase tracking-wider font-mono text-center px-1 truncate max-w-full">
                         {labelText}
                       </span>
                     </div>
@@ -922,12 +920,12 @@ export const NewScanView: React.FC = () => {
                     </span>
                   </div>
 
-                  <p className="text-sm sm:text-base text-gray-600 font-medium">
+                  <p className="text-xs sm:text-base text-gray-600 font-medium">
                     Patient: <strong className="text-black font-bold">{activePatient?.name || activeScan.patient_name}</strong> (
                     {activePatient?.id || activeScan.patient_id}) • Screened on {activeScan.scan_date}
                   </p>
 
-                  <div className="flex flex-wrap items-center gap-3 pt-1 text-xs text-gray-500 font-mono font-medium">
+                  <div className="flex flex-wrap items-center gap-2 sm:gap-3 pt-1 text-xs text-gray-500 font-mono font-medium">
                     <span>Confidence: <strong className="text-[#1E54B7]">{activeScan.detection.confidence.toFixed(1)}%</strong></span>
                     <span>•</span>
                     <span>Processing: {activeScan.processing_time}s</span>
@@ -938,11 +936,11 @@ export const NewScanView: React.FC = () => {
               </div>
 
               {/* Right: Quick Action Speech & Reset */}
-              <div className="flex flex-wrap items-center gap-3 shrink-0">
+              <div className="flex flex-wrap items-center gap-2.5 sm:gap-3 w-full sm:w-auto shrink-0">
                 <button
                   type="button"
                   onClick={handleListenDiagnosis}
-                  className={`flex items-center gap-2 px-6 py-3.5 rounded-full font-black text-xs uppercase tracking-wider transition-all shadow-md min-h-[46px] cursor-pointer ${
+                  className={`flex-1 sm:flex-initial flex items-center justify-center gap-2 px-4 sm:px-6 py-3 sm:py-3.5 rounded-full font-black text-xs uppercase tracking-wider transition-all shadow-md min-h-[44px] cursor-pointer ${
                     isSpeaking
                       ? 'bg-rose-100 text-rose-800 border-2 border-rose-400 animate-pulse'
                       : 'bg-[#E1FA4A] hover:bg-[#d6f236] text-black shadow-lg hover:scale-105'
@@ -956,7 +954,7 @@ export const NewScanView: React.FC = () => {
                 <button
                   type="button"
                   onClick={handleDownloadPDF}
-                  className="flex items-center gap-2 px-6 py-3.5 rounded-full bg-gray-100 hover:bg-gray-200 text-black font-black text-xs uppercase tracking-wider transition-all min-h-[46px] cursor-pointer"
+                  className="flex-1 sm:flex-initial flex items-center justify-center gap-2 px-4 sm:px-6 py-3 sm:py-3.5 rounded-full bg-gray-100 hover:bg-gray-200 text-black font-black text-xs uppercase tracking-wider transition-all min-h-[44px] cursor-pointer"
                 >
                   <FileDown className="w-4 h-4 text-[#1E54B7]" />
                   <span>Large-Print PDF</span>
@@ -965,7 +963,7 @@ export const NewScanView: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setRagDrawerOpen(true)}
-                  className="flex items-center gap-2 px-6 py-3.5 rounded-full bg-sky-50 hover:bg-sky-100 text-[#1E54B7] border border-sky-200 font-black text-xs uppercase tracking-wider transition-all min-h-[46px] cursor-pointer shadow-sm"
+                  className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 sm:px-6 py-3 sm:py-3.5 rounded-full bg-sky-50 hover:bg-sky-100 text-[#1E54B7] border border-sky-200 font-black text-xs uppercase tracking-wider transition-all min-h-[44px] cursor-pointer shadow-sm"
                 >
                   <BookOpen className="w-4 h-4 text-[#1E54B7]" />
                   <span>Clinical Guidelines (RAG)</span>

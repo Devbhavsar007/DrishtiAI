@@ -1,5 +1,18 @@
-import React from 'react';
-import { LayoutDashboard, Microscope, Layers, Users } from 'lucide-react';
+import React, { useState } from 'react';
+import {
+  LayoutDashboard,
+  Microscope,
+  Layers,
+  Users,
+  MoreHorizontal,
+  X,
+  Sparkles,
+  ExternalLink,
+  ShieldCheck,
+  Radio,
+  ChevronRight,
+  Database,
+} from 'lucide-react';
 import { useMedicalData } from '../context/MedicalDataContext';
 import { ActiveView } from '../types';
 
@@ -13,6 +26,7 @@ interface NavItem {
 
 export const Navigation: React.FC = () => {
   const { activeView, setActiveView, batchQueue } = useMedicalData();
+  const [isMoreOpen, setIsMoreOpen] = useState(false);
 
   const navItems: NavItem[] = [
     {
@@ -45,12 +59,11 @@ export const Navigation: React.FC = () => {
     },
   ];
 
-
   return (
     <>
-      {/* Desktop Left Sidebar (240px wide) */}
+      {/* Desktop Left Sidebar (Responsive w-60 on tablet / w-64 on desktop) */}
       <aside
-        className="hidden md:flex flex-col w-64 shrink-0 bg-white/10 backdrop-blur-2xl border-r border-white/15 min-h-[calc(100vh-72px)] p-4 gap-2 select-none text-white"
+        className="hidden md:flex flex-col w-60 lg:w-64 shrink-0 bg-white/10 backdrop-blur-2xl border-r border-white/15 min-h-[calc(100vh-72px)] p-4 gap-2 select-none text-white transition-all"
         aria-label="Main Navigation Menu"
       >
         <div className="space-y-1.5">
@@ -124,40 +137,157 @@ export const Navigation: React.FC = () => {
         </div>
       </aside>
 
-      {/* Mobile & Tablet Bottom Sticky Navigation Bar */}
+      {/* Mobile & Tablet Bottom Sticky Navigation Bar with Safe Area Support */}
       <nav
-        className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-[#619FE8]/95 backdrop-blur-2xl border-t border-white/30 px-3 py-2 flex items-center justify-around shadow-2xl"
+        className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-[#619FE8]/95 backdrop-blur-2xl border-t border-white/30 px-2 sm:px-4 py-2 pb-safe flex items-center justify-around shadow-2xl"
         role="navigation"
-        aria-label="Mobile Navigation"
+        aria-label="Mobile Clinical Navigation"
       >
         {navItems.map((item) => {
           const isActive = activeView === item.id || (item.id === 'patients' && activeView === 'patient-detail');
           return (
             <button
               key={item.id}
-              onClick={() => setActiveView(item.id)}
-              className={`relative flex flex-col items-center justify-center min-w-[70px] min-h-[50px] py-1 px-2.5 rounded-2xl transition-all ${
+              onClick={() => {
+                setIsMoreOpen(false);
+                setActiveView(item.id);
+              }}
+              className={`relative flex flex-col items-center justify-center min-w-[62px] xs:min-w-[68px] min-h-[48px] py-1 px-2 rounded-2xl transition-all ${
                 isActive
                   ? 'text-[#1E54B7] bg-white font-black shadow-lg scale-105'
-                  : 'text-white/80 hover:text-white'
+                  : 'text-white/80 hover:text-white active:scale-95'
               }`}
               aria-current={isActive ? 'page' : undefined}
             >
               <div className="relative">
                 {item.icon}
                 {item.id === 'batch-screening' && batchQueue.length > 0 && (
-                  <span className="absolute -top-1.5 -right-2 w-4 h-4 rounded-full bg-[#E1FA4A] text-black text-[9px] font-mono font-black flex items-center justify-center shadow-sm">
+                  <span className="absolute -top-1.5 -right-2.5 w-4 h-4 rounded-full bg-[#E1FA4A] text-black text-[9px] font-mono font-black flex items-center justify-center shadow-sm">
                     {batchQueue.length}
                   </span>
                 )}
               </div>
-              <span className="text-[11px] mt-0.5 font-bold tracking-tight whitespace-nowrap">
+              <span className="text-[10px] xs:text-[11px] mt-0.5 font-bold tracking-tight whitespace-nowrap">
                 {item.shortLabel}
               </span>
             </button>
           );
         })}
+
+        {/* 5th Button: More / System Drawer for mobile */}
+        <button
+          onClick={() => setIsMoreOpen((prev) => !prev)}
+          className={`relative flex flex-col items-center justify-center min-w-[62px] xs:min-w-[68px] min-h-[48px] py-1 px-2 rounded-2xl transition-all ${
+            isMoreOpen || activeView === 'admin'
+              ? 'text-[#1E54B7] bg-[#E1FA4A] font-black shadow-lg scale-105'
+              : 'text-white/80 hover:text-white active:scale-95'
+          }`}
+          aria-label="More Navigation Options"
+          aria-expanded={isMoreOpen}
+        >
+          <MoreHorizontal className="w-5 h-5" />
+          <span className="text-[10px] xs:text-[11px] mt-0.5 font-bold tracking-tight whitespace-nowrap">
+            More
+          </span>
+        </button>
       </nav>
+
+      {/* Mobile "More" Drawer Action Sheet */}
+      {isMoreOpen && (
+        <div
+          className="md:hidden fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex flex-col justify-end"
+          onClick={() => setIsMoreOpen(false)}
+        >
+          <div
+            className="w-full bg-[#1E54B7] border-t-2 border-white/25 rounded-t-[32px] p-6 pb-safe shadow-2xl animate-sheet-up space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Sheet Handle and Title */}
+            <div className="flex items-center justify-between pb-2 border-b border-white/15">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-[#E1FA4A]" />
+                <span className="font-bold text-sm text-white uppercase tracking-wider">
+                  DrishtiAI Quick Switcher
+                </span>
+              </div>
+              <button
+                onClick={() => setIsMoreOpen(false)}
+                className="w-8 h-8 rounded-full bg-white/15 flex items-center justify-center text-white/80 hover:text-white hover:bg-white/25 transition-all cursor-pointer"
+                aria-label="Close menu"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Quick Actions List */}
+            <div className="space-y-2.5">
+              <button
+                onClick={() => {
+                  setIsMoreOpen(false);
+                  setActiveView('admin');
+                }}
+                className="w-full flex items-center justify-between p-3.5 rounded-2xl bg-white/15 hover:bg-white/25 active:bg-white/30 border border-white/25 text-white transition-all cursor-pointer shadow-sm"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-[#E1FA4A] text-black flex items-center justify-center font-bold shadow-sm">
+                    ⚡
+                  </div>
+                  <div className="text-left">
+                    <div className="text-sm font-bold flex items-center gap-2">
+                      <span>MLOps Platform</span>
+                      <span className="w-2 h-2 rounded-full bg-[#E1FA4A] animate-pulse"></span>
+                    </div>
+                    <div className="text-[11px] text-white/75">
+                      Model registry, training jobs, drift telemetry &amp; approvals
+                    </div>
+                  </div>
+                </div>
+                <ChevronRight className="w-4 h-4 text-[#E1FA4A]" />
+              </button>
+
+              <button
+                onClick={() => {
+                  setIsMoreOpen(false);
+                  setActiveView('landing');
+                }}
+                className="w-full flex items-center justify-between p-3.5 rounded-2xl bg-white/10 hover:bg-white/20 active:bg-white/25 border border-white/20 text-white transition-all cursor-pointer shadow-sm"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-white/20 text-white flex items-center justify-center font-bold">
+                    <ExternalLink className="w-4 h-4" />
+                  </div>
+                  <div className="text-left">
+                    <div className="text-sm font-bold">Product Landing Page</div>
+                    <div className="text-[11px] text-white/75">
+                      Clinical proof points, live demo, FAQ &amp; specifications
+                    </div>
+                  </div>
+                </div>
+                <ChevronRight className="w-4 h-4 text-white/60" />
+              </button>
+            </div>
+
+            {/* Clinic Info & Offline Status Card */}
+            <div className="p-4 rounded-2xl bg-white/10 border border-white/15 space-y-2 text-white">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-white/70">
+                  Active Clinical Session
+                </span>
+                <span className="inline-flex items-center gap-1 text-[10px] text-[#E1FA4A] font-mono font-bold">
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#E1FA4A] animate-pulse"></span>
+                  Gemma-4 Connected
+                </span>
+              </div>
+              <p className="text-xs font-bold text-white">General Hospital - Mumbai</p>
+              <div className="flex items-center justify-between pt-2 border-t border-white/15 text-[10px] font-mono text-white/80">
+                <span>PWA Local Sync: OK</span>
+                <span className="text-[#E1FA4A] font-bold">WCAG AAA Compliant</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 };
+

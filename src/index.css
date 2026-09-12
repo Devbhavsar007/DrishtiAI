@@ -520,3 +520,48 @@
 .animate-count-up {
   animation: count-up 0.4s cubic-bezier(0.32, 0.72, 0, 1) forwards;
 }
+
+/* ═══════════════════════════════════════════════
+   RESPONSIVE & MOBILE PWA APP ENHANCEMENTS
+   ═══════════════════════════════════════════════ */
+
+/* Safe area padding utilities for modern notched mobile screens (iPhone / Android) */
+.pb-safe {
+  padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+}
+
+.pt-safe {
+  padding-top: max(0.75rem, env(safe-area-inset-top));
+}
+
+/* Hide scrollbars for slick mobile horizontal pills */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Native-feel touch ergonomics */
+.touch-momentum {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+}
+
+/* Mobile drawer slide-up keyframe */
+@keyframes slide-up-sheet {
+  from {
+    transform: translateY(100%);
+    opacity: 0.8;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.animate-sheet-up {
+  animation: slide-up-sheet 0.28s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+

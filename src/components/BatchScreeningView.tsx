@@ -126,7 +126,7 @@ export const BatchScreeningView: React.FC = () => {
   return (
     <div className="space-y-6 sm:space-y-8 animate-fadeIn text-white">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-7 bg-white text-black rounded-[36px] shadow-2xl border-4 border-white">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5 sm:p-7 bg-white text-black rounded-3xl sm:rounded-[36px] shadow-2xl border-2 sm:border-4 border-white">
         <div className="space-y-1">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-sky-100 text-[#1E54B7] text-xs font-black">
             <Layers className="w-4 h-4" />
@@ -135,15 +135,15 @@ export const BatchScreeningView: React.FC = () => {
           <h1 className="text-2xl sm:text-3xl font-extrabold text-black flex items-center gap-3 font-sans">
             Batch Screening Queue
           </h1>
-          <p className="text-sm sm:text-base text-gray-600 font-medium">
+          <p className="text-xs sm:text-base text-gray-600 font-medium">
             High-throughput pipeline for community outreach vans and rural screening camps
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2.5 sm:gap-3 w-full sm:w-auto">
           <button
             onClick={() => setShowAddModal(true)}
-            className="flex items-center gap-2 px-5 py-3 rounded-full bg-gray-100 hover:bg-gray-200 text-black font-black text-xs uppercase tracking-wider transition-all min-h-[46px] cursor-pointer"
+            className="flex-1 sm:flex-initial flex items-center justify-center gap-2 px-4 sm:px-5 py-2.5 sm:py-3 rounded-full bg-gray-100 hover:bg-gray-200 text-black font-black text-xs uppercase tracking-wider transition-all min-h-[44px] cursor-pointer"
           >
             <UserPlus className="w-4 h-4 text-[#1E54B7]" />
             <span>Add Patient</span>
@@ -152,7 +152,7 @@ export const BatchScreeningView: React.FC = () => {
           <button
             onClick={handleStartBatch}
             disabled={isProcessing || queuedCount === 0}
-            className="flex items-center gap-2 px-7 py-3 rounded-full bg-[#E1FA4A] hover:bg-[#d6f236] disabled:opacity-40 text-black font-black text-xs uppercase tracking-wider shadow-lg hover:scale-105 transition-all min-h-[46px] cursor-pointer"
+            className="flex-1 sm:flex-initial flex items-center justify-center gap-2 px-5 sm:px-7 py-2.5 sm:py-3 rounded-full bg-[#E1FA4A] hover:bg-[#d6f236] disabled:opacity-40 text-black font-black text-xs uppercase tracking-wider shadow-lg hover:scale-105 transition-all min-h-[44px] cursor-pointer"
           >
             {isProcessing ? (
               <RefreshCw className="w-4 h-4 animate-spin" />
@@ -165,46 +165,46 @@ export const BatchScreeningView: React.FC = () => {
       </div>
 
       {/* Summary Metrics */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
-        <div className="p-6 bg-white text-black rounded-[28px] border-4 border-white shadow-xl flex items-center justify-between">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 sm:gap-5">
+        <div className="p-5 sm:p-6 bg-white text-black rounded-2xl sm:rounded-[28px] border-2 sm:border-4 border-white shadow-xl flex items-center justify-between">
           <div>
-            <span className="text-xs font-black uppercase tracking-wider text-gray-500 block">
+            <span className="text-[11px] sm:text-xs font-black uppercase tracking-wider text-gray-500 block">
               Waiting in Queue
             </span>
-            <span className="text-4xl font-black text-[#1E54B7] font-mono mt-1 block">
+            <span className="text-3xl sm:text-4xl font-black text-[#1E54B7] font-mono mt-1 block">
               {queuedCount}
             </span>
           </div>
-          <div className="p-3.5 rounded-2xl bg-sky-100 text-[#1E54B7]">
-            <Clock className="w-6 h-6" />
+          <div className="p-3 sm:p-3.5 rounded-2xl bg-sky-100 text-[#1E54B7]">
+            <Clock className="w-5 h-5 sm:w-6 sm:h-6" />
           </div>
         </div>
 
-        <div className="p-6 bg-white text-black rounded-[28px] border-4 border-white shadow-xl flex items-center justify-between">
+        <div className="p-5 sm:p-6 bg-white text-black rounded-2xl sm:rounded-[28px] border-2 sm:border-4 border-white shadow-xl flex items-center justify-between">
           <div>
-            <span className="text-xs font-black uppercase tracking-wider text-gray-500 block">
+            <span className="text-[11px] sm:text-xs font-black uppercase tracking-wider text-gray-500 block">
               Successfully Analyzed
             </span>
-            <span className="text-4xl font-black text-emerald-700 font-mono mt-1 block">
+            <span className="text-3xl sm:text-4xl font-black text-emerald-700 font-mono mt-1 block">
               {completedCount}
             </span>
           </div>
-          <div className="p-3.5 rounded-2xl bg-emerald-100 text-emerald-700">
-            <CheckCircle2 className="w-6 h-6" />
+          <div className="p-3 sm:p-3.5 rounded-2xl bg-emerald-100 text-emerald-700">
+            <CheckCircle2 className="w-5 h-5 sm:w-6 sm:h-6" />
           </div>
         </div>
 
-        <div className="p-6 bg-white text-black rounded-[28px] border-4 border-rose-200/80 shadow-xl flex items-center justify-between">
+        <div className="p-5 sm:p-6 bg-white text-black rounded-2xl sm:rounded-[28px] border-2 sm:border-4 border-rose-200/80 shadow-xl flex items-center justify-between">
           <div>
-            <span className="text-xs font-black uppercase tracking-wider text-gray-500 block">
+            <span className="text-[11px] sm:text-xs font-black uppercase tracking-wider text-gray-500 block">
               High Risk / Urgent
             </span>
-            <span className="text-4xl font-black text-rose-600 font-mono mt-1 block">
+            <span className="text-3xl sm:text-4xl font-black text-rose-600 font-mono mt-1 block">
               {highRiskCount}
             </span>
           </div>
-          <div className="p-3.5 rounded-2xl bg-rose-100 text-rose-600">
-            <AlertTriangle className="w-6 h-6" />
+          <div className="p-3 sm:p-3.5 rounded-2xl bg-rose-100 text-rose-600">
+            <AlertTriangle className="w-5 h-5 sm:w-6 sm:h-6" />
           </div>
         </div>
       </div>
@@ -232,15 +232,15 @@ export const BatchScreeningView: React.FC = () => {
       )}
 
       {/* Queue Table */}
-      <div className="p-7 bg-white text-black rounded-[36px] shadow-2xl border-4 border-white space-y-6">
+      <div className="p-5 sm:p-7 bg-white text-black rounded-3xl sm:rounded-[36px] shadow-2xl border-2 sm:border-4 border-white space-y-5 sm:space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <h2 className="text-xl font-bold text-black">Queued Patient Records ({batchQueue.length})</h2>
+          <h2 className="text-lg sm:text-xl font-bold text-black">Queued Patient Records ({batchQueue.length})</h2>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <button
               onClick={handleExportCSV}
               disabled={batchQueue.length === 0}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-800 text-xs font-black transition-all cursor-pointer"
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-800 text-xs font-black transition-all cursor-pointer"
             >
               <FileSpreadsheet className="w-4 h-4 text-[#1E54B7]" />
               <span>Export CSV</span>
@@ -249,7 +249,7 @@ export const BatchScreeningView: React.FC = () => {
             <button
               onClick={clearBatchQueue}
               disabled={batchQueue.length === 0}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-full bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-black transition-all cursor-pointer"
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-black transition-all cursor-pointer"
             >
               <Trash2 className="w-4 h-4" />
               <span>Clear Queue</span>
@@ -257,8 +257,8 @@ export const BatchScreeningView: React.FC = () => {
           </div>
         </div>
 
-        <div className="overflow-x-auto rounded-2xl border border-gray-200">
-          <table className="w-full text-left border-collapse" role="table">
+        <div className="overflow-x-auto rounded-2xl border border-gray-200 touch-momentum no-scrollbar">
+          <table className="w-full text-left border-collapse min-w-[560px]" role="table">
             <thead>
               <tr className="bg-gray-100 text-gray-700 text-[11px] uppercase tracking-wider border-b border-gray-200">
                 <th className="p-4 font-black">Scan Preview</th>
