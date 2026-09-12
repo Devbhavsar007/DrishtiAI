@@ -84,9 +84,18 @@ from config import (
 )
 
 # ---------------------------------------------------------------------------
-# Flask app
+# Flask app — configured with dist SPA and static assets
 # ---------------------------------------------------------------------------
-app = Flask(__name__)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DIST_DIR = os.path.join(BASE_DIR, "dist")
+PUBLIC_DIR = os.path.join(BASE_DIR, "public")
+
+app = Flask(
+    __name__,
+    static_folder=os.path.join(DIST_DIR, "assets") if os.path.isdir(os.path.join(DIST_DIR, "assets")) else None,
+    static_url_path="/assets",
+    template_folder=DIST_DIR if os.path.isdir(DIST_DIR) else BASE_DIR,
+)
 app.secret_key = FLASK_SECRET
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16 MB upload limit
 
@@ -422,7 +431,53 @@ def api_demo_run():
 @app.route("/")
 def index():
     """Serve the main SPA."""
-    return render_template("index.html")
+    dist_index = os.path.join(DIST_DIR, "index.html")
+    if os.path.isfile(dist_index):
+        return send_from_directory(DIST_DIR, "index.html")
+    root_index = os.path.join(BASE_DIR, "index.html")
+    if os.path.isfile(root_index):
+        return send_from_directory(BASE_DIR, "index.html")
+    return jsonify({
+        "status": "online",
+        "service": "DrishtiAI Clinical Intelligence Backend",
+        "version": "2.2",
+        "frontend": "http://localhost:3000",
+        "api_docs": "/api/health"
+    })
+
+
+@app.route("/favicon.ico")
+def favicon():
+    """Serve favicon or app icon without 404."""
+    for folder in [PUBLIC_DIR, DIST_DIR, BASE_DIR]:
+        if os.path.isfile(os.path.join(folder, "icon-192.png")):
+            return send_from_directory(folder, "icon-192.png")
+        if os.path.isfile(os.path.join(folder, "favicon.ico")):
+            return send_from_directory(folder, "favicon.ico")
+    return "", 204
+
+
+@app.route("/<path:path>")
+def serve_spa_or_asset(path):
+    """Serve public assets (PWA icons, video, sw) or SPA client routes."""
+    # Never intercept API or results routes
+    if path.startswith("api/") or path.startswith("results/"):
+        return jsonify({"error": f"Endpoint '/{path}' not found."}), 404
+
+    # 1. Check in public directory (PWA assets, video, manifest)
+    if os.path.isfile(os.path.join(PUBLIC_DIR, path)):
+        return send_from_directory(PUBLIC_DIR, path)
+
+    # 2. Check in dist directory (assets, built files)
+    if os.path.isfile(os.path.join(DIST_DIR, path)):
+        return send_from_directory(DIST_DIR, path)
+
+    # 3. Fallback to SPA index.html for client-side routing
+    dist_index = os.path.join(DIST_DIR, "index.html")
+    if os.path.isfile(dist_index):
+        return send_from_directory(DIST_DIR, "index.html")
+
+    return jsonify({"error": f"Resource '/{path}' not found."}), 404
 
 
 @app.route("/results/<path:filename>")
@@ -2002,6 +2057,29 @@ try:
     log.info("Intelligence Control Plane admin API registered at /api/admin")
 except ImportError:
     log.warning("Admin API module not found — Intelligence Control Plane disabled")
+
+
+# ========================================
+# GLOBAL ERROR HANDLERS
+# ========================================
+
+@app.errorhandler(500)
+def handle_500_error(e):
+    log.exception("Internal Server Error: %s", e)
+    return jsonify({
+        "success": False,
+        "error": "Internal Server Error",
+        "detail": str(e)
+    }), 500
+
+
+@app.errorhandler(404)
+def handle_404_error(e):
+    return jsonify({
+        "success": False,
+        "error": "Not Found",
+        "detail": str(e)
+    }), 404
 
 
 # ========================================
