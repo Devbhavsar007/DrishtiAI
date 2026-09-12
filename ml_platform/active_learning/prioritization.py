@@ -195,7 +195,7 @@ def build_active_learning_queue(limit: int = 50) -> list[ActiveLearningCandidate
     try:
         with get_db() as conn:
             rows = conn.execute(
-                """SELECT s.id, s.patient_id, s.dr_stage as stage, s.confidence,
+                """SELECT s.id, s.patient_id, s.stage as stage, s.confidence,
                           s.safety_state, s.created_at
                    FROM scans s
                    LEFT JOIN doctor_reviews dr ON s.id = dr.scan_id

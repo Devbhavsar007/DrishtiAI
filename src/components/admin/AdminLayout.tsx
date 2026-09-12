@@ -1,4 +1,20 @@
 import React from 'react';
+import {
+  Eye,
+  Sparkles,
+  LayoutDashboard,
+  Database,
+  Package,
+  Cpu,
+  ShieldCheck,
+  Activity,
+  CheckSquare,
+  ScrollText,
+  Server,
+  ArrowLeft,
+  ShieldAlert,
+  SlidersHorizontal,
+} from 'lucide-react';
 import { AdminRole } from '../../types';
 
 export type AdminView =
@@ -21,16 +37,16 @@ interface AdminLayoutProps {
   children: React.ReactNode;
 }
 
-const NAV_ITEMS: { id: AdminView; label: string; icon: string; badge?: string }[] = [
-  { id: 'dashboard', label: 'Overview', icon: '📊' },
-  { id: 'data', label: 'Data & Ingestion', icon: '🧬' },
-  { id: 'datasets', label: 'Dataset Registry', icon: '📦' },
-  { id: 'training', label: 'Training Jobs', icon: '⚡' },
-  { id: 'models', label: 'Model Registry', icon: '🛡️' },
-  { id: 'drift', label: 'Drift & Discordance', icon: '📈' },
-  { id: 'approvals', label: 'Clinical Approvals', icon: '⚖️' },
-  { id: 'audit', label: 'Audit Trail', icon: '📜' },
-  { id: 'system', label: 'System & Workers', icon: '⚙️' },
+const NAV_ITEMS: { id: AdminView; label: string; icon: React.ReactNode; badge?: string }[] = [
+  { id: 'dashboard', label: 'Overview', icon: <LayoutDashboard className="w-4 h-4" /> },
+  { id: 'data', label: 'Data & Ingestion', icon: <Database className="w-4 h-4" /> },
+  { id: 'datasets', label: 'Dataset Registry', icon: <Package className="w-4 h-4" /> },
+  { id: 'training', label: 'Training Jobs', icon: <Cpu className="w-4 h-4" /> },
+  { id: 'models', label: 'Model Registry', icon: <ShieldCheck className="w-4 h-4" /> },
+  { id: 'drift', label: 'Drift & Discordance', icon: <Activity className="w-4 h-4" /> },
+  { id: 'approvals', label: 'Clinical Approvals', icon: <CheckSquare className="w-4 h-4" /> },
+  { id: 'audit', label: 'Audit Trail', icon: <ScrollText className="w-4 h-4" /> },
+  { id: 'system', label: 'System & Workers', icon: <Server className="w-4 h-4" /> },
 ];
 
 const ADMIN_ROLES: AdminRole[] = [
@@ -51,106 +67,155 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
   children,
 }) => {
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-cyan-500/30">
-      {/* Top Header Banner */}
-      <header className="border-b border-slate-800/80 bg-slate-900/60 backdrop-blur-xl sticky top-0 z-40 px-6 py-3.5 flex items-center justify-between">
-        <div className="flex items-center space-x-3.5">
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-cyan-500 via-indigo-600 to-purple-600 flex items-center justify-center shadow-lg shadow-cyan-500/20 ring-1 ring-white/20">
-            <span className="text-white font-black text-lg tracking-wider">D</span>
-          </div>
-          <div>
-            <div className="flex items-center space-x-2.5">
-              <span className="font-bold tracking-tight text-white text-base">DrishtiAI</span>
-              <span className="px-2 py-0.5 text-[10px] font-semibold tracking-wider uppercase rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/30">
-                Intelligence Control Plane
+    <div className="min-h-screen bg-[#619FE8] text-white flex flex-col font-sans selection:bg-[#E1FA4A] selection:text-black relative grain-overlay">
+      {/* Top Clinical Header Bar */}
+      <header
+        className="sticky top-0 z-40 w-full min-h-[72px] bg-[#619FE8]/85 backdrop-blur-2xl border-b border-white/10 text-white flex items-center shadow-sm"
+        role="region"
+        aria-label="Intelligence Control Plane Header"
+      >
+        <div className="w-full px-4 sm:px-8 py-2.5 flex flex-wrap items-center justify-between gap-4">
+          {/* Brand & Suite Subtitle */}
+          <div className="flex items-center gap-3.5 select-none">
+            <div className="w-9 h-9 bg-sky-100 border border-sky-300 rounded-xl flex items-center justify-center shrink-0 shadow-sm">
+              <Eye className="w-5 h-5 text-[#1E54B7] stroke-[2]" />
+            </div>
+            <div className="flex flex-col">
+              <div className="flex items-center gap-2">
+                <span
+                  className="text-xl font-bold tracking-tight text-white"
+                  style={{ fontFamily: 'var(--font-heading)' }}
+                >
+                  DrishtiAI
+                </span>
+                <span className="inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md bg-[#E1FA4A] text-black shadow-sm">
+                  <Sparkles className="w-3 h-3" />
+                  MLOps Control Plane
+                </span>
+              </div>
+              <span className="text-[10px] uppercase tracking-[0.12em] text-white/80 font-bold">
+                Model Lifecycle, Governance & Drift Telemetry
               </span>
             </div>
-            <p className="text-xs text-slate-400">Model Governance, Training Orchestration & Drift</p>
           </div>
-        </div>
 
-        {/* Role Selector & Actions */}
-        <div className="flex items-center space-x-4">
-          <div className="flex items-center space-x-2 bg-slate-800/50 border border-slate-700/60 rounded-xl px-3 py-1.5">
-            <span className="text-xs text-slate-400 font-medium">Acting Role:</span>
-            <select
-              value={adminRole}
-              onChange={(e) => onRoleChange(e.target.value as AdminRole)}
-              className="bg-transparent text-xs font-semibold text-cyan-300 focus:outline-none cursor-pointer"
+          {/* Right Role Switcher & Back to Clinical Suite Action */}
+          <div className="flex flex-wrap items-center gap-3">
+            {/* Role Selector */}
+            <div className="flex items-center gap-2 bg-white/15 backdrop-blur-md border border-white/25 rounded-xl px-3 py-1.5 shadow-sm">
+              <SlidersHorizontal className="w-3.5 h-3.5 text-white/80" />
+              <span className="text-xs text-white/80 font-medium">Role:</span>
+              <select
+                value={adminRole}
+                aria-label="Active Administrative Role"
+                onChange={(e) => onRoleChange(e.target.value as AdminRole)}
+                className="bg-transparent text-xs font-bold text-white focus:outline-none cursor-pointer pr-1"
+              >
+                {ADMIN_ROLES.map((role) => (
+                  <option key={role} value={role} className="bg-[#1E54B7] text-white">
+                    {role.replace('_', ' ')}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Back to Clinical Workspace Button */}
+            <button
+              onClick={onExitAdmin}
+              className="flex items-center gap-1.5 px-4 h-9 rounded-xl font-bold text-xs uppercase tracking-wider bg-[#E1FA4A] hover:bg-[#d6f236] active:scale-95 text-black shadow-[0_2px_8px_rgba(22,163,74,0.25)] transition-all cursor-pointer btn-clinical"
+              title="Return to Clinical Screening Suite"
             >
-              {ADMIN_ROLES.map((role) => (
-                <option key={role} value={role} className="bg-slate-900 text-slate-200">
-                  {role.replace('_', ' ')}
-                </option>
-              ))}
-            </select>
+              <ArrowLeft className="w-3.5 h-3.5 stroke-[2.5]" />
+              <span>Clinical Suite</span>
+            </button>
           </div>
-
-          <button
-            onClick={onExitAdmin}
-            className="flex items-center space-x-1.5 px-3.5 py-1.5 rounded-xl text-xs font-medium bg-slate-800/80 hover:bg-slate-700 text-slate-200 border border-slate-700 transition-all hover:border-slate-600"
-          >
-            <span>←</span>
-            <span>Clinical Platform</span>
-          </button>
         </div>
       </header>
 
-      {/* Main App Body */}
-      <div className="flex flex-1 overflow-hidden">
-        {/* Navigation Sidebar */}
-        <aside className="w-64 border-r border-slate-800/80 bg-slate-900/30 backdrop-blur-md flex flex-col justify-between p-4 shrink-0">
-          <div className="space-y-1">
-            <div className="px-3 py-2 text-[11px] font-semibold tracking-wider uppercase text-slate-400">
-              Navigation
+      {/* Primary Workspace: Sidebar + Main Views */}
+      <div className="flex-1 flex flex-row relative">
+        {/* Desktop Sidebar (matching clinical Navigation.tsx) */}
+        <aside
+          className="hidden md:flex flex-col w-64 shrink-0 bg-white/10 backdrop-blur-2xl border-r border-white/15 min-h-[calc(100vh-72px)] p-4 gap-2 select-none text-white"
+          aria-label="MLOps Navigation Menu"
+        >
+          <div className="space-y-1.5">
+            <div className="px-3 py-1 text-[10px] font-bold tracking-wider uppercase text-white/60">
+              Control Planes
             </div>
-            {NAV_ITEMS.map((item) => {
-              const active = currentView === item.id;
+            {NAV_ITEMS.map((item, idx) => {
+              const isActive = currentView === item.id;
               return (
                 <button
                   key={item.id}
                   onClick={() => onSelectView(item.id)}
-                  className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-medium transition-all ${
-                    active
-                      ? 'bg-gradient-to-r from-cyan-500/15 to-indigo-500/10 text-cyan-300 border border-cyan-500/30 shadow-sm shadow-cyan-500/10 font-semibold'
-                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
-                  }`}
+                  style={{ animationDelay: `${idx * 40}ms` }}
+                  className={`animate-slide-up flex items-center w-full gap-3 p-3 rounded-xl font-semibold btn-clinical cursor-pointer transition-all duration-200 ${
+                    isActive
+                      ? 'bg-white text-[#1E54B7] shadow-[0_4px_12px_rgba(8,145,178,0.15)] font-bold'
+                      : 'text-white/80 hover:bg-white/12 hover:text-white active:bg-white/20'
+                  } focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#1E54B7]`}
+                  aria-current={isActive ? 'page' : undefined}
                 >
-                  <div className="flex items-center space-x-3">
-                    <span className="text-base">{item.icon}</span>
-                    <span>{item.label}</span>
+                  <div
+                    className={`transition-colors duration-150 ${
+                      isActive ? 'text-[#1E54B7]' : 'text-white/75'
+                    }`}
+                  >
+                    {item.icon}
                   </div>
-                  {item.badge && (
-                    <span className="px-1.5 py-0.5 text-[10px] font-bold rounded-md bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                      {item.badge}
-                    </span>
-                  )}
+
+                  <div className="flex-1 min-w-0 text-left">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[13px] font-semibold tracking-tight truncate block">
+                        {item.label}
+                      </span>
+                      {item.badge && (
+                        <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded-full font-mono font-bold bg-[#E1FA4A] text-black shadow-sm">
+                          {item.badge}
+                        </span>
+                      )}
+                    </div>
+                  </div>
                 </button>
               );
             })}
           </div>
 
-          {/* System Badge */}
-          <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800/80 text-[11px] space-y-1.5">
-            <div className="flex items-center justify-between text-slate-400">
-              <span>Plane Engine</span>
-              <span className="inline-flex items-center gap-1 text-emerald-400 font-semibold">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                ACTIVE
-              </span>
-            </div>
-            <div className="text-[10px] text-slate-400 flex justify-between">
-              <span>Safety Policy</span>
-              <span className="text-slate-300 font-mono">SAFE-1.0</span>
+          {/* System Telemetry Box in Sidebar Footer */}
+          <div className="mt-auto space-y-2.5">
+            <div className="p-3.5 rounded-2xl bg-white/15 border border-white/20 text-white space-y-2 backdrop-blur-md">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-bold text-white/70 uppercase tracking-[0.1em]">
+                  Plane Engine
+                </span>
+                <span className="inline-flex items-center gap-1.5 text-[10px] text-[#E1FA4A] font-mono font-black">
+                  <span className="w-2 h-2 rounded-full bg-[#E1FA4A] animate-pulse"></span>
+                  ONLINE
+                </span>
+              </div>
+              <div className="flex items-center justify-between pt-2 border-t border-white/15 text-[10px] font-mono text-white/80">
+                <span>Active Model</span>
+                <span className="font-bold text-white">ResNet50 v2.2</span>
+              </div>
+              <div className="flex items-center justify-between text-[10px] font-mono text-white/70">
+                <span>Safety Gate</span>
+                <span className="text-[#E1FA4A] font-bold">SAFE-1.0</span>
+              </div>
             </div>
           </div>
         </aside>
 
-        {/* Primary Content View */}
-        <main className="flex-1 overflow-y-auto p-8 bg-gradient-to-b from-slate-950 via-slate-900/30 to-slate-950">
-          <div className="max-w-7xl mx-auto">{children}</div>
+        {/* Primary Content View Container */}
+        <main
+          className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 pb-24 md:pb-12 overflow-y-auto"
+          role="main"
+          id="mlops-content"
+        >
+          {children}
         </main>
       </div>
     </div>
   );
 };
+

@@ -90,11 +90,23 @@ export const Navigation: React.FC = () => {
         {/* Clinical Accreditation / Clinic Mode Footer Box in Sidebar */}
         <div className="mt-auto space-y-2.5">
           <button
+            onClick={() => setActiveView('admin')}
+            className="w-full flex items-center justify-between p-3 rounded-xl bg-white/15 hover:bg-white/25 active:bg-white/30 border border-white/25 text-xs font-bold text-white btn-clinical cursor-pointer shadow-sm focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#1E54B7]"
+            title="Open DrishtiAI MLOps & Model Control Plane"
+          >
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-[#E1FA4A] animate-pulse"></span>
+              <span>MLOps Platform</span>
+            </div>
+            <span className="text-[#E1FA4A] font-mono text-[11px] font-bold">Control ⚡</span>
+          </button>
+
+          <button
             onClick={() => setActiveView('landing')}
-            className="w-full flex items-center justify-between p-3 rounded-xl bg-white/10 hover:bg-white/18 active:bg-white/25 border border-white/15 text-xs font-semibold text-white/90 btn-clinical cursor-pointer focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#1E54B7]"
+            className="w-full flex items-center justify-between p-2.5 rounded-xl bg-white/10 hover:bg-white/18 active:bg-white/25 border border-white/15 text-xs font-medium text-white/90 btn-clinical cursor-pointer focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#1E54B7]"
           >
             <span>Landing Page</span>
-            <span className="text-[#E1FA4A] font-bold">Overview ↗</span>
+            <span className="text-white/70 font-semibold text-[11px]">Overview ↗</span>
           </button>
 
           <div className="p-3.5 rounded-2xl bg-white/15 border border-white/20 text-white space-y-1.5 backdrop-blur-md">

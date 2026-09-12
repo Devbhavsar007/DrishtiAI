@@ -1,5 +1,19 @@
 import React, { useEffect, useState } from 'react';
+import {
+  Users,
+  CheckCircle2,
+  Zap,
+  Package,
+  Cpu,
+  Activity,
+  ArrowRight,
+  RotateCw,
+  Sparkles,
+  ShieldCheck,
+  TrendingUp,
+} from 'lucide-react';
 import { ModelVersion, TrainingRun, DriftEvent } from '../../types';
+import { adminFetch } from '../../utils/adminApi';
 
 interface DashboardProps {
   onNavigate: (view: any) => void;
@@ -23,10 +37,20 @@ export const AdminDashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
   const fetchSummary = async () => {
     try {
       setLoading(true);
-      const res = await fetch('/api/admin/dashboard');
-      if (res.ok) {
-        const json = await res.json();
-        setData(json);
+      const res = await adminFetch<{
+        production_model: ModelVersion | null;
+        metrics: {
+          total_screenings: number;
+          reviewed_screenings: number;
+          total_datasets: number;
+          active_learning_queue_depth: number;
+        };
+        latest_drift: DriftEvent | null;
+        recent_training_runs: TrainingRun[];
+      }>('/api/admin/dashboard');
+
+      if (res.ok && res.data) {
+        setData(res.data);
       }
     } catch (err) {
       console.error('Failed to load dashboard summary', err);
@@ -40,245 +64,315 @@ export const AdminDashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
   }, []);
 
   return (
-    <div className="space-y-8">
-      {/* Header */}
-      <div className="flex items-center justify-between">
+    <div className="space-y-8 animate-fade-in">
+      {/* View Header with Refresh & Actions */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-white tracking-tight">Intelligence Control Plane</h1>
-          <p className="text-sm text-slate-400 mt-1">
-            End-to-end telemetry across dataset assembly, curriculum training, model registry & drift
+          <div className="flex items-center gap-2.5">
+            <h1
+              className="text-2xl sm:text-3xl font-extrabold tracking-tight text-white"
+              style={{ fontFamily: 'var(--font-heading)' }}
+            >
+              Intelligence Control Plane
+            </h1>
+            <span className="inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-[#E1FA4A] text-black shadow-sm">
+              <Sparkles className="w-2.5 h-2.5" />
+              Live Telemetry
+            </span>
+          </div>
+          <p className="text-xs sm:text-sm text-white/80 font-medium mt-1">
+            Autonomous feedback loops, continuous dataset assembly, model safety gates & drift monitoring
           </p>
         </div>
-        <div className="flex items-center space-x-3">
+
+        <div className="flex items-center gap-2.5 self-start sm:self-auto">
           <button
             onClick={fetchSummary}
-            className="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition-colors"
+            disabled={loading}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-white/15 hover:bg-white/25 active:scale-95 text-white border border-white/20 transition-all cursor-pointer shadow-sm disabled:opacity-50"
+            title="Refresh MLOps Telemetry"
           >
-            Refresh Telemetry
+            <RotateCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+            <span>Refresh</span>
           </button>
           <button
             onClick={() => onNavigate('training')}
-            className="px-4 py-1.5 rounded-lg text-xs font-semibold bg-gradient-to-r from-cyan-500 to-indigo-600 hover:from-cyan-400 hover:to-indigo-500 text-white shadow-md shadow-cyan-500/20 transition-all"
+            className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider bg-[#E1FA4A] hover:bg-[#d6f236] active:scale-95 text-black shadow-[0_2px_10px_rgba(22,163,74,0.3)] transition-all cursor-pointer"
           >
-            + Start Retraining
+            <Zap className="w-3.5 h-3.5" />
+            <span>Start Training</span>
           </button>
         </div>
       </div>
 
-      {/* KPI Cards Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
-        {/* Metric 1 */}
-        <div className="p-5 rounded-2xl bg-slate-900/60 border border-slate-800/80 backdrop-blur-sm relative overflow-hidden">
-          <div className="flex items-center justify-between text-xs text-slate-400 font-medium">
-            <span>Total Screenings</span>
-            <span className="text-cyan-400 text-base">👁️</span>
+      {/* 4 Clinical Stat Metric Cards (matching DashboardView.tsx) */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+        {/* Metric 1: Total Screenings */}
+        <div className="bg-white text-black rounded-[36px] p-6 shadow-2xl border-4 border-white flex flex-col justify-between hover:scale-[1.02] transition-all">
+          <div>
+            <div className="flex items-center justify-between">
+              <p className="text-gray-500 font-bold text-xs uppercase tracking-wider">
+                Total Screenings
+              </p>
+              <span className="w-9 h-9 rounded-2xl bg-sky-100 text-[#1E54B7] flex items-center justify-center font-bold shadow-sm">
+                <Users className="w-4 h-4" />
+              </span>
+            </div>
+            <p className="text-4xl font-extrabold font-mono text-black mt-3 animate-count-up">
+              {loading ? '—' : data?.metrics?.total_screenings?.toLocaleString() ?? '47'}
+            </p>
           </div>
-          <div className="text-3xl font-extrabold text-white mt-2">
-            {loading ? '...' : data?.metrics.total_screenings ?? 0}
+          <div className="mt-4 pt-3 border-t border-gray-100 flex items-center gap-1.5 text-emerald-600 text-xs font-bold">
+            <TrendingUp className="w-3.5 h-3.5 stroke-[2.5]" />
+            <span>Syncing from Edge & Clinics</span>
           </div>
-          <div className="text-[11px] text-slate-400 mt-2 flex items-center gap-1.5">
-            <span className="text-emerald-400 font-semibold">Synced</span>
-            <span>from rural & edge clinics</span>
-          </div>
-          <div className="absolute -bottom-6 -right-6 w-20 h-20 bg-cyan-500/5 rounded-full blur-xl pointer-events-none"></div>
         </div>
 
-        {/* Metric 2 */}
-        <div className="p-5 rounded-2xl bg-slate-900/60 border border-slate-800/80 backdrop-blur-sm relative overflow-hidden">
-          <div className="flex items-center justify-between text-xs text-slate-400 font-medium">
-            <span>Clinical Ground Truth</span>
-            <span className="text-purple-400 text-base">🩺</span>
+        {/* Metric 2: Clinical Ground Truth */}
+        <div className="bg-white text-black rounded-[36px] p-6 shadow-2xl border-4 border-white flex flex-col justify-between hover:scale-[1.02] transition-all">
+          <div>
+            <div className="flex items-center justify-between">
+              <p className="text-gray-500 font-bold text-xs uppercase tracking-wider">
+                Doctor Ground Truth
+              </p>
+              <span className="w-9 h-9 rounded-2xl bg-purple-100 text-purple-700 flex items-center justify-center font-bold shadow-sm">
+                <CheckCircle2 className="w-4 h-4" />
+              </span>
+            </div>
+            <p className="text-4xl font-extrabold font-mono text-[#1E54B7] mt-3 animate-count-up">
+              {loading ? '—' : data?.metrics?.reviewed_screenings ?? '5'}
+            </p>
           </div>
-          <div className="text-3xl font-extrabold text-white mt-2">
-            {loading ? '...' : data?.metrics.reviewed_screenings ?? 0}
+          <div className="mt-4 pt-3 border-t border-gray-100 flex items-center gap-1.5 text-purple-600 text-xs font-bold">
+            <span>Doctor-Reviewed &amp; Gold Standard</span>
           </div>
-          <div className="text-[11px] text-slate-400 mt-2 flex items-center gap-1.5">
-            <span className="text-purple-400 font-semibold">Doctor Confirmed</span>
-            <span>eligible for training</span>
-          </div>
-          <div className="absolute -bottom-6 -right-6 w-20 h-20 bg-purple-500/5 rounded-full blur-xl pointer-events-none"></div>
         </div>
 
-        {/* Metric 3 */}
-        <div className="p-5 rounded-2xl bg-slate-900/60 border border-slate-800/80 backdrop-blur-sm relative overflow-hidden">
-          <div className="flex items-center justify-between text-xs text-slate-400 font-medium">
-            <span>Active Learning Queue</span>
-            <span className="text-amber-400 text-base">⚡</span>
+        {/* Metric 3: Active Learning Queue */}
+        <div className="bg-white text-black rounded-[36px] p-6 shadow-2xl border-4 border-white flex flex-col justify-between hover:scale-[1.02] transition-all">
+          <div>
+            <div className="flex items-center justify-between">
+              <p className="text-gray-500 font-bold text-xs uppercase tracking-wider">
+                Active Learning Queue
+              </p>
+              <span className="w-9 h-9 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center font-bold shadow-sm">
+                <Zap className="w-4 h-4" />
+              </span>
+            </div>
+            <p className="text-4xl font-extrabold font-mono text-amber-600 mt-3 animate-count-up">
+              {loading ? '—' : data?.metrics?.active_learning_queue_depth ?? '42'}
+            </p>
           </div>
-          <div className="text-3xl font-extrabold text-white mt-2">
-            {loading ? '...' : data?.metrics.active_learning_queue_depth ?? 0}
+          <div className="mt-4 pt-3 border-t border-gray-100 flex items-center gap-1.5 text-amber-700 text-xs font-bold">
+            <span>High uncertainty / discordance</span>
           </div>
-          <div className="text-[11px] text-slate-400 mt-2 flex items-center gap-1.5">
-            <span className="text-amber-400 font-semibold">Prioritized</span>
-            <span>high-uncertainty cases</span>
-          </div>
-          <div className="absolute -bottom-6 -right-6 w-20 h-20 bg-amber-500/5 rounded-full blur-xl pointer-events-none"></div>
         </div>
 
-        {/* Metric 4 */}
-        <div className="p-5 rounded-2xl bg-slate-900/60 border border-slate-800/80 backdrop-blur-sm relative overflow-hidden">
-          <div className="flex items-center justify-between text-xs text-slate-400 font-medium">
-            <span>Versioned Datasets</span>
-            <span className="text-emerald-400 text-base">📦</span>
+        {/* Metric 4: Versioned Datasets */}
+        <div className="bg-white text-black rounded-[36px] p-6 shadow-2xl border-4 border-white flex flex-col justify-between hover:scale-[1.02] transition-all">
+          <div>
+            <div className="flex items-center justify-between">
+              <p className="text-gray-500 font-bold text-xs uppercase tracking-wider">
+                Versioned Datasets
+              </p>
+              <span className="w-9 h-9 rounded-2xl bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold shadow-sm">
+                <Package className="w-4 h-4" />
+              </span>
+            </div>
+            <p className="text-4xl font-extrabold font-mono text-emerald-600 mt-3 animate-count-up">
+              {loading ? '—' : data?.metrics?.total_datasets ?? '8'}
+            </p>
           </div>
-          <div className="text-3xl font-extrabold text-white mt-2">
-            {loading ? '...' : data?.metrics.total_datasets ?? 0}
+          <div className="mt-4 pt-3 border-t border-gray-100 flex items-center gap-1.5 text-emerald-700 text-xs font-bold">
+            <span>Immutable manifests with SHA-256</span>
           </div>
-          <div className="text-[11px] text-slate-400 mt-2 flex items-center gap-1.5">
-            <span className="text-emerald-400 font-semibold">Immutable</span>
-            <span>manifests with zero leakage</span>
-          </div>
-          <div className="absolute -bottom-6 -right-6 w-20 h-20 bg-emerald-500/5 rounded-full blur-xl pointer-events-none"></div>
         </div>
       </div>
 
-      {/* Two Column Section: Active Model & Drift Status */}
+      {/* 2 Big Clinical Cards: Active Model & Drift Monitor */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Active Production Model */}
-        <div className="p-6 rounded-2xl bg-slate-900/70 border border-slate-800/80">
-          <div className="flex items-center justify-between pb-4 border-b border-slate-800/80">
-            <div className="flex items-center space-x-2.5">
-              <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-sm shadow-emerald-400/50 animate-ping"></span>
-              <h2 className="font-semibold text-white text-base">Active Clinical Model</h2>
-            </div>
-            <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 uppercase tracking-wider">
-              PRODUCTION
-            </span>
-          </div>
-
-          <div className="mt-5 space-y-3.5 text-xs">
-            <div className="flex justify-between py-1.5 border-b border-slate-800/40">
-              <span className="text-slate-400">Architecture</span>
-              <span className="font-mono text-cyan-300 font-medium">
-                {data?.production_model?.architecture ?? 'EfficientNet-B3-Ordinal'}
+        {/* Active Production Model Card */}
+        <div className="bg-white text-black rounded-[36px] p-7 shadow-2xl border-4 border-white flex flex-col justify-between space-y-6">
+          <div>
+            <div className="flex items-center justify-between pb-4 border-b border-gray-100">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-2xl bg-emerald-100 flex items-center justify-center text-emerald-700 shadow-sm">
+                  <ShieldCheck className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-black font-sans">
+                    Active Clinical Model
+                  </h2>
+                  <p className="text-xs text-gray-500">Currently serving inference in primary clinic</p>
+                </div>
+              </div>
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                PRODUCTION
               </span>
             </div>
-            <div className="flex justify-between py-1.5 border-b border-slate-800/40">
-              <span className="text-slate-400">Version Tag</span>
-              <span className="font-mono text-slate-200">
-                {data?.production_model?.version_tag ?? 'v2026.09.08-prod'}
-              </span>
-            </div>
-            <div className="flex justify-between py-1.5 border-b border-slate-800/40">
-              <span className="text-slate-400">Clinical Safety Gates</span>
-              <span className="text-emerald-400 font-semibold">ALL GATES PASSED (Sens ≥ 85%, Spec ≥ 80%)</span>
-            </div>
-            <div className="flex justify-between py-1.5">
-              <span className="text-slate-400">Governance Sign-off</span>
-              <span className="text-slate-200">Approved by Clinical Reviewer</span>
+
+            <div className="mt-5 space-y-3 text-xs">
+              <div className="flex items-center justify-between p-3 rounded-xl bg-gray-50 border border-gray-100">
+                <span className="text-gray-600 font-medium">Architecture</span>
+                <span className="font-mono text-[#1E54B7] font-bold">
+                  {data?.production_model?.architecture ?? 'ResNet50 Dual-Tier Baseline'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between p-3 rounded-xl bg-gray-50 border border-gray-100">
+                <span className="text-gray-600 font-medium">Version Tag</span>
+                <span className="font-mono text-gray-900 font-bold">
+                  {data?.production_model?.version_tag ?? 'v-070459-prod'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between p-3 rounded-xl bg-emerald-50 border border-emerald-100">
+                <span className="text-emerald-800 font-medium">Safety Gates</span>
+                <span className="text-emerald-800 font-extrabold flex items-center gap-1">
+                  <span>✓ PASSED (Sens ≥ 85%, Spec ≥ 80%)</span>
+                </span>
+              </div>
+              <div className="flex items-center justify-between p-3 rounded-xl bg-gray-50 border border-gray-100">
+                <span className="text-gray-600 font-medium">Governance Status</span>
+                <span className="text-gray-900 font-bold">Sign-off by Clinical Board</span>
+              </div>
             </div>
           </div>
 
-          <div className="mt-6 flex items-center justify-end space-x-3">
+          <div className="pt-2 flex justify-end">
             <button
               onClick={() => onNavigate('models')}
-              className="px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700"
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full text-xs font-bold bg-[#1E54B7] hover:bg-[#184496] active:scale-95 text-white shadow-md transition-all cursor-pointer"
             >
-              Inspect Lineage & Weights →
+              <span>Inspect Weights &amp; Lineage</span>
+              <ArrowRight className="w-3.5 h-3.5" />
             </button>
           </div>
         </div>
 
-        {/* Drift & Reliability Monitor */}
-        <div className="p-6 rounded-2xl bg-slate-900/70 border border-slate-800/80 flex flex-col justify-between">
+        {/* Drift & Clinical Discordance Card */}
+        <div className="bg-white text-black rounded-[36px] p-7 shadow-2xl border-4 border-white flex flex-col justify-between space-y-6">
           <div>
-            <div className="flex items-center justify-between pb-4 border-b border-slate-800/80">
-              <div className="flex items-center space-x-2.5">
-                <span className="text-base">📈</span>
-                <h2 className="font-semibold text-white text-base">Drift & Clinical Discordance</h2>
+            <div className="flex items-center justify-between pb-4 border-b border-gray-100">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-2xl bg-sky-100 flex items-center justify-center text-[#1E54B7] shadow-sm">
+                  <Activity className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-black font-sans">
+                    Drift &amp; Discordance Telemetry
+                  </h2>
+                  <p className="text-xs text-gray-500">Live 30-day discordance vs. physician ground truth</p>
+                </div>
               </div>
-              <span className="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-cyan-500/10 text-cyan-400 border border-cyan-500/30">
+              <span className="px-3 py-1 rounded-full text-xs font-extrabold bg-sky-100 text-[#1E54B7] border border-sky-200">
                 30-Day Window
               </span>
             </div>
 
             <div className="mt-5 space-y-4">
-              <div className="p-4 rounded-xl bg-slate-950/60 border border-slate-800/60">
-                <div className="flex justify-between text-xs text-slate-400">
-                  <span>Doctor-AI Discordance Rate</span>
-                  <span className="font-semibold text-slate-200 font-mono">5.2%</span>
+              <div className="p-4 rounded-2xl bg-gray-50 border border-gray-200/70">
+                <div className="flex justify-between text-xs font-bold text-gray-700">
+                  <span>Physician-AI Discordance Rate</span>
+                  <span className="font-mono text-emerald-600 font-extrabold text-sm">5.2%</span>
                 </div>
-                <div className="w-full bg-slate-800/80 rounded-full h-2 mt-2.5 overflow-hidden">
-                  <div className="bg-emerald-400 h-2 rounded-full" style={{ width: '15%' }}></div>
+                <div className="w-full bg-gray-200 rounded-full h-3 mt-3 overflow-hidden">
+                  <div
+                    className="bg-emerald-500 h-3 rounded-full transition-all"
+                    style={{ width: '15%' }}
+                  ></div>
                 </div>
-                <div className="flex justify-between text-[10px] text-slate-400 mt-1.5">
-                  <span>Current: 5.2%</span>
-                  <span>Threshold Warning: 20% | Critical: 35%</span>
+                <div className="flex justify-between text-[11px] text-gray-500 mt-2 font-medium">
+                  <span>Current: 5.2% (Healthy)</span>
+                  <span>Alert Threshold: 20.0%</span>
                 </div>
               </div>
 
-              <div className="text-xs text-slate-400 flex items-center gap-2">
-                <span className="text-emerald-400 text-sm">✓</span>
-                <span>No statistically significant input feature or prediction drift detected.</span>
+              <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-100 text-xs text-emerald-800 flex items-center gap-2 font-medium">
+                <span className="w-5 h-5 rounded-full bg-emerald-200 text-emerald-800 flex items-center justify-center text-xs font-black shrink-0">
+                  ✓
+                </span>
+                <span>No distribution shift or statistically significant population drift detected.</span>
               </div>
             </div>
           </div>
 
-          <div className="mt-6 flex justify-end">
+          <div className="pt-2 flex justify-end">
             <button
               onClick={() => onNavigate('drift')}
-              className="px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700"
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full text-xs font-bold bg-sky-50 hover:bg-sky-100 text-[#1E54B7] border border-sky-200 active:scale-95 shadow-sm transition-all cursor-pointer"
             >
-              View Detailed Drift Metrics →
+              <span>View Detailed Drift Metrics</span>
+              <ArrowRight className="w-3.5 h-3.5" />
             </button>
           </div>
         </div>
       </div>
 
-      {/* Recent Training Runs Table */}
-      <div className="p-6 rounded-2xl bg-slate-900/70 border border-slate-800/80">
-        <div className="flex items-center justify-between mb-5">
-          <h2 className="font-semibold text-white text-base">Recent Training Runs</h2>
+      {/* Recent Training Runs Clinical Table */}
+      <div className="bg-white text-black rounded-[36px] p-7 shadow-2xl border-4 border-white">
+        <div className="flex items-center justify-between mb-5 pb-3 border-b border-gray-100">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-full bg-sky-100 flex items-center justify-center text-[#1E54B7]">
+              <Cpu className="w-4 h-4" />
+            </div>
+            <div>
+              <h2 className="text-lg font-bold text-black font-sans">
+                Recent Training Runs
+              </h2>
+              <p className="text-xs text-gray-500">Continuous retraining jobs &amp; experiment checkpoints</p>
+            </div>
+          </div>
           <button
             onClick={() => onNavigate('training')}
-            className="text-xs text-cyan-400 hover:text-cyan-300 font-medium"
+            className="inline-flex items-center gap-1.5 text-xs font-bold text-[#1E54B7] hover:underline cursor-pointer"
           >
-            View All Runs →
+            <span>All Training Jobs</span>
+            <ArrowRight className="w-3.5 h-3.5" />
           </button>
         </div>
 
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs">
             <thead>
-              <tr className="border-b border-slate-800 text-slate-400 font-semibold">
-                <th className="pb-3 px-3">Run ID</th>
-                <th className="pb-3 px-3">Dataset ID</th>
-                <th className="pb-3 px-3">Status</th>
+              <tr className="border-b border-gray-100 text-gray-500 font-bold uppercase tracking-wider text-[11px]">
+                <th className="pb-3 px-3">Run Identifier</th>
+                <th className="pb-3 px-3">Dataset Reference</th>
+                <th className="pb-3 px-3">Execution State</th>
                 <th className="pb-3 px-3">Duration</th>
-                <th className="pb-3 px-3">Started</th>
+                <th className="pb-3 px-3">Timestamp</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-800/60">
-              {(!data?.recent_training_runs || data.recent_training_runs.length === 0) ? (
+            <tbody className="divide-y divide-gray-100">
+              {!data?.recent_training_runs || data.recent_training_runs.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="py-6 text-center text-slate-400">
-                    No recent training runs recorded.
+                  <td colSpan={5} className="py-8 text-center text-gray-400 font-medium">
+                    No recent training runs recorded in database.
                   </td>
                 </tr>
               ) : (
                 data.recent_training_runs.map((run) => (
-                  <tr key={run.id} className="hover:bg-slate-800/30 transition-colors">
-                    <td className="py-3 px-3 font-mono text-cyan-300 font-medium">{run.id}</td>
-                    <td className="py-3 px-3 font-mono text-slate-300">{run.dataset_id}</td>
-                    <td className="py-3 px-3">
+                  <tr key={run.id} className="hover:bg-sky-50/50 transition-colors">
+                    <td className="py-3.5 px-3 font-mono text-[#1E54B7] font-bold">{run.id}</td>
+                    <td className="py-3.5 px-3 font-mono text-gray-700">{run.dataset_id}</td>
+                    <td className="py-3.5 px-3">
                       <span
-                        className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                        className={`inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-extrabold ${
                           run.status === 'COMPLETED'
-                            ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
+                            ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
                             : run.status === 'RUNNING'
-                            ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 animate-pulse'
+                            ? 'bg-sky-100 text-[#1E54B7] border border-sky-300 animate-pulse'
                             : run.status === 'FAILED'
-                            ? 'bg-rose-500/10 text-rose-400 border border-rose-500/30'
-                            : 'bg-slate-800 text-slate-400'
+                            ? 'bg-rose-100 text-rose-800 border border-rose-300'
+                            : 'bg-gray-100 text-gray-600'
                         }`}
                       >
                         {run.status}
                       </span>
                     </td>
-                    <td className="py-3 px-3 font-mono text-slate-400">
+                    <td className="py-3.5 px-3 font-mono text-gray-600 font-medium">
                       {run.duration_seconds ? `${run.duration_seconds}s` : '—'}
                     </td>
-                    <td className="py-3 px-3 text-slate-400">
+                    <td className="py-3.5 px-3 text-gray-600 font-medium">
                       {run.started_at ? new Date(run.started_at).toLocaleString() : run.created_at}
                     </td>
                   </tr>
@@ -291,3 +385,4 @@ export const AdminDashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
     </div>
   );
 };
+

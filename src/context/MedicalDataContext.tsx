@@ -115,7 +115,7 @@ export const MedicalDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
       // On production deployments (Vercel / Cloud), only the Clinical Platform is served
       if (
         window.location.port === '3001' ||
-        (import.meta.env.DEV && (urlParams.get('view') === 'admin' || window.location.pathname.startsWith('/admin')))
+        (Boolean((import.meta as any).env?.DEV) && (urlParams.get('view') === 'admin' || window.location.pathname.startsWith('/admin')))
       ) {
         return 'admin';
       }
