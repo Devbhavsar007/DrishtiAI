@@ -119,6 +119,21 @@ export const MedicalDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
       ) {
         return 'admin';
       }
+
+      // Check if launched as an installed PWA application or explicit app mode
+      const isStandalone =
+        window.matchMedia?.('(display-mode: standalone)').matches ||
+        (window.navigator as any).standalone === true ||
+        urlParams.get('app') === 'true' ||
+        urlParams.get('source') === 'pwa';
+
+      if (isStandalone) {
+        const reqView = urlParams.get('view') as ActiveView;
+        return (reqView && reqView !== 'landing') ? reqView : 'dashboard';
+      }
+
+      const paramView = urlParams.get('view') as ActiveView;
+      if (paramView) return paramView;
     }
     return 'landing';
   });

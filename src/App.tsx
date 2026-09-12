@@ -67,19 +67,43 @@ const AppBody: React.FC = () => {
   const [adminView, setAdminView] = useState<AdminView>('dashboard');
   const [adminRole, setAdminRole] = useState<AdminRole>('SUPER_ADMIN');
 
-  // Show cinematic video splash once per session
+  // Track previous view to trigger the application intro animation when launching into the workspace
+  const prevViewRef = React.useRef<ActiveView>(activeView);
+
+  // Show cinematic video splash ONLY for the application, NEVER on the website
   const [showSplash, setShowSplash] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
-      // Skip splash if already seen this session, or if user prefers reduced motion
-      if (sessionStorage.getItem('drishti_splash_seen') === '1') return false;
-      if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return false;
-      // Skip splash for admin/mlops views
-      if (activeView === 'admin') return false;
+      // 1. NEVER show splash when opening the website (landing view) or admin platform
+      if (activeView === 'landing' || activeView === 'admin') {
+        return false;
+      }
+      // 2. Skip splash if already seen this session
+      if (sessionStorage.getItem('drishti_splash_seen') === '1') {
+        return false;
+      }
+      // 3. Skip splash if user prefers reduced motion
+      if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+        return false;
+      }
+      // 4. User is starting directly in the application (e.g. installed PWA or direct app link)
+      return true;
     }
-    return true;
+    return false;
   });
 
-  // Cinematic intro — plays the DrishtiAI promo video once
+  // When transitioning from the website (landing) into the application workspace
+  React.useEffect(() => {
+    if (prevViewRef.current === 'landing' && activeView !== 'landing' && activeView !== 'admin') {
+      const splashSeen = sessionStorage.getItem('drishti_splash_seen') === '1';
+      const prefersReduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+      if (!splashSeen && !prefersReduced) {
+        setShowSplash(true);
+      }
+    }
+    prevViewRef.current = activeView;
+  }, [activeView]);
+
+  // Cinematic intro — plays the DrishtiAI promo video once specifically for the application
   if (showSplash) {
     return <VideoSplash onComplete={() => setShowSplash(false)} />;
   }
