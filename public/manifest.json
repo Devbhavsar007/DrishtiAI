@@ -1,0 +1,44 @@
+{
+  "name": "DrishtiAI — Clinical Retinal Screening",
+  "short_name": "DrishtiAI",
+  "description": "Medical-grade AI-powered Diabetic Retinopathy screening platform with Gemma intelligence, Grad-CAM explainability, and multilingual clinical reports.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#619FE8",
+  "theme_color": "#1E54B7",
+  "orientation": "any",
+  "scope": "/",
+  "lang": "en",
+  "categories": ["medical", "health", "productivity"],
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "screenshots": [],
+  "shortcuts": [
+    {
+      "name": "New Scan",
+      "short_name": "Scan",
+      "url": "/?view=new-scan",
+      "description": "Start a new retinal fundus scan",
+      "icons": []
+    },
+    {
+      "name": "Patient Directory",
+      "short_name": "Patients",
+      "url": "/?view=patients",
+      "description": "Browse patient records",
+      "icons": []
+    }
+  ]
+}

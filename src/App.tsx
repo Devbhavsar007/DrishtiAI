@@ -14,6 +14,7 @@ import { BatchScreeningView } from './components/BatchScreeningView';
 import { PatientDirectoryView } from './components/PatientDirectoryView';
 import { PatientDetailView } from './components/PatientDetailView';
 import { LandingPageView } from './components/LandingPageView';
+import { VideoSplash } from './components/VideoSplash';
 
 // Intelligence Control Plane components
 import { AdminLayout, AdminView } from './components/admin/AdminLayout';
@@ -65,6 +66,23 @@ const AppBody: React.FC = () => {
   const { activeView, setActiveView } = useMedicalData();
   const [adminView, setAdminView] = useState<AdminView>('dashboard');
   const [adminRole, setAdminRole] = useState<AdminRole>('SUPER_ADMIN');
+
+  // Show cinematic video splash once per session
+  const [showSplash, setShowSplash] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      // Skip splash if already seen this session, or if user prefers reduced motion
+      if (sessionStorage.getItem('drishti_splash_seen') === '1') return false;
+      if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return false;
+      // Skip splash for admin/mlops views
+      if (activeView === 'admin') return false;
+    }
+    return true;
+  });
+
+  // Cinematic intro — plays the DrishtiAI promo video once
+  if (showSplash) {
+    return <VideoSplash onComplete={() => setShowSplash(false)} />;
+  }
 
   // Intelligence Control Plane Logical View
   if (activeView === 'admin') {
