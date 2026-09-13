@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { AccessibilityProvider } from './context/AccessibilityContext';
 import { MedicalDataProvider, useMedicalData } from './context/MedicalDataContext';
 import { AccessibilityToolbar } from './components/AccessibilityToolbar';
@@ -67,45 +67,36 @@ const AppBody: React.FC = () => {
   const [adminView, setAdminView] = useState<AdminView>('dashboard');
   const [adminRole, setAdminRole] = useState<AdminRole>('SUPER_ADMIN');
 
-  // Track previous view to trigger the application intro animation when launching into the workspace
-  const prevViewRef = React.useRef<ActiveView>(activeView);
+  // Detect if running as standalone app (PWA / installed app / explicit app=true)
+  const isAppMode = useMemo(() => {
+    if (typeof window === 'undefined') return false;
+    const urlParams = new URLSearchParams(window.location.search);
+    return (
+      window.matchMedia?.('(display-mode: standalone)').matches ||
+      (window.navigator as any).standalone === true ||
+      urlParams.get('app') === 'true' ||
+      urlParams.get('source') === 'pwa'
+    );
+  }, []);
 
-  // Show cinematic video splash ONLY for the application, NEVER on the website
+  // Show cinematic video splash — ONLY in app/PWA mode, NEVER on the website.
+  // App mode: unskippable animation plays once per session before the dashboard.
+  // Website: landing page goes straight to dashboard with no animation.
   const [showSplash, setShowSplash] = useState<boolean>(() => {
-    if (typeof window !== 'undefined') {
-      // 1. NEVER show splash when opening the website (landing view) or admin platform
-      if (activeView === 'landing' || activeView === 'admin') {
-        return false;
-      }
-      // 2. Skip splash if already seen this session
-      if (sessionStorage.getItem('drishti_splash_seen') === '1') {
-        return false;
-      }
-      // 3. Skip splash if user prefers reduced motion
-      if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
-        return false;
-      }
-      // 4. User is starting directly in the application (e.g. installed PWA or direct app link)
+    if (typeof window !== 'undefined' && isAppMode) {
+      // Skip if admin view
+      if (activeView === 'admin') return false;
+      // Skip if already seen this session
+      if (sessionStorage.getItem('drishti_splash_seen') === '1') return false;
+      // App mode: show unskippable splash
       return true;
     }
     return false;
   });
 
-  // When transitioning from the website (landing) into the application workspace
-  React.useEffect(() => {
-    if (prevViewRef.current === 'landing' && activeView !== 'landing' && activeView !== 'admin') {
-      const splashSeen = sessionStorage.getItem('drishti_splash_seen') === '1';
-      const prefersReduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-      if (!splashSeen && !prefersReduced) {
-        setShowSplash(true);
-      }
-    }
-    prevViewRef.current = activeView;
-  }, [activeView]);
-
   // Cinematic intro — plays the DrishtiAI promo video once specifically for the application
   if (showSplash) {
-    return <VideoSplash onComplete={() => setShowSplash(false)} />;
+    return <VideoSplash onComplete={() => setShowSplash(false)} unskippable={isAppMode} />;
   }
 
   // Intelligence Control Plane Logical View

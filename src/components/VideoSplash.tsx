@@ -14,20 +14,23 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 
 interface VideoSplashProps {
   onComplete: () => void;
+  /** When true, the skip button is hidden and the video must play to completion. */
+  unskippable?: boolean;
 }
 
-export const VideoSplash: React.FC<VideoSplashProps> = ({ onComplete }) => {
+export const VideoSplash: React.FC<VideoSplashProps> = ({ onComplete, unskippable = false }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [fadeOut, setFadeOut] = useState(false);
   const [progress, setProgress] = useState(0);
   const [showSkip, setShowSkip] = useState(false);
   const [isMuted, setIsMuted] = useState(true);
 
-  // Show skip button after 2 seconds
+  // Show skip button after 2 seconds (only if skippable)
   useEffect(() => {
+    if (unskippable) return;
     const timer = setTimeout(() => setShowSkip(true), 2000);
     return () => clearTimeout(timer);
-  }, []);
+  }, [unskippable]);
 
   // Try to unmute on first click/tap anywhere
   useEffect(() => {
@@ -120,20 +123,22 @@ export const VideoSplash: React.FC<VideoSplashProps> = ({ onComplete }) => {
           </div>
         </div>
 
-        {/* Skip button */}
-        <button
-          onClick={handleSkip}
-          className={`flex items-center gap-2 px-5 py-2.5 rounded-full text-xs font-bold bg-white/10 hover:bg-white/20 text-white border border-white/20 backdrop-blur-xl transition-all cursor-pointer shadow-lg ${
-            showSkip ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4 pointer-events-none'
-          }`}
-          style={{ transition: 'opacity 0.5s ease, transform 0.5s ease, background 0.2s ease' }}
-        >
-          <span>Skip Intro</span>
-          <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M5 4l10 8-10 8V4Z" />
-            <line x1="19" y1="5" x2="19" y2="19" />
-          </svg>
-        </button>
+        {/* Skip button — hidden when unskippable (app / PWA mode) */}
+        {!unskippable && (
+          <button
+            onClick={handleSkip}
+            className={`flex items-center gap-2 px-5 py-2.5 rounded-full text-xs font-bold bg-white/10 hover:bg-white/20 text-white border border-white/20 backdrop-blur-xl transition-all cursor-pointer shadow-lg ${
+              showSkip ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4 pointer-events-none'
+            }`}
+            style={{ transition: 'opacity 0.5s ease, transform 0.5s ease, background 0.2s ease' }}
+          >
+            <span>Skip Intro</span>
+            <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M5 4l10 8-10 8V4Z" />
+              <line x1="19" y1="5" x2="19" y2="19" />
+            </svg>
+          </button>
+        )}
       </div>
     </div>
   );
