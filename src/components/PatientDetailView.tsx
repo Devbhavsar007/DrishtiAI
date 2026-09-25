@@ -10,6 +10,10 @@ import {
   FileText,
   History,
   ShieldCheck,
+  Heart,
+  Droplets,
+  User,
+  Clock,
 } from 'lucide-react';
 import { useMedicalData } from '../context/MedicalDataContext';
 import { DR_STAGES, ScanAnalysis, TimelineEvent } from '../types';
@@ -118,131 +122,156 @@ export const PatientDetailView: React.FC = () => {
   };
 
   return (
-    <div className="space-y-6 sm:space-y-8 animate-fadeIn text-white">
-      {/* Top Breadcrumb & Actions */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
+    <div className="space-y-4 sm:space-y-6 animate-fadeIn text-white">
+      {/* Top Breadcrumb & Actions — compact on mobile */}
+      <div className="flex items-center justify-between gap-2">
         <button
           onClick={() => setActiveView('patients')}
-          className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-full bg-white/20 hover:bg-white/30 backdrop-blur-md border border-white/40 text-white font-bold text-xs uppercase tracking-wider transition-all cursor-pointer shadow-sm self-start sm:self-auto"
+          className="inline-flex items-center gap-1.5 px-3.5 sm:px-5 py-2 sm:py-2.5 rounded-full bg-white/20 hover:bg-white/30 backdrop-blur-md border border-white/40 text-white font-bold text-[11px] sm:text-xs uppercase tracking-wider transition-all cursor-pointer shadow-sm"
         >
-          <ArrowLeft className="w-4 h-4" />
-          <span>Back to Directory</span>
+          <ArrowLeft className="w-3.5 h-3.5" />
+          <span className="hidden xs:inline">Back</span>
+          <span className="xs:hidden">←</span>
         </button>
 
         <button
           onClick={handleStartScan}
-          className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 sm:px-7 py-3 sm:py-3.5 rounded-full bg-[#E1FA4A] hover:bg-[#d6f236] text-black font-black text-xs uppercase tracking-wider shadow-xl hover:scale-105 transition-all cursor-pointer"
+          className="inline-flex items-center gap-1.5 px-4 sm:px-7 py-2.5 sm:py-3.5 rounded-full bg-[#E1FA4A] hover:bg-[#d6f236] text-black font-black text-[11px] sm:text-xs uppercase tracking-wider shadow-xl hover:scale-105 transition-all cursor-pointer"
         >
-          <Microscope className="w-4 h-4" />
-          <span>Perform New Scan for {activePatient.name.split(' ')[0]} ↗</span>
+          <Microscope className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+          <span className="hidden sm:inline">New Scan for {activePatient.name.split(' ')[0]} ↗</span>
+          <span className="sm:hidden">New Scan ↗</span>
         </button>
       </div>
 
-      {/* Patient Profile Hero Card */}
-      <div className="p-5 sm:p-8 bg-white text-black rounded-3xl sm:rounded-[36px] shadow-2xl border-2 sm:border-4 border-white space-y-5 sm:space-y-6">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
-          <div className="space-y-2">
-            <div className="flex flex-wrap items-center gap-3">
-              <h1 className="text-2xl sm:text-4xl font-black text-black font-sans">
-                {activePatient.name}
-              </h1>
-              <span className="text-xs font-mono font-bold text-[#1E54B7] bg-sky-100 px-3 py-1 rounded-full">
-                {activePatient.id}
-              </span>
+      {/* ═══ Patient Profile Hero Card — Mobile-First Redesign ═══ */}
+      <div className="bg-white text-black rounded-2xl sm:rounded-[36px] shadow-2xl border border-gray-100 sm:border-4 sm:border-white overflow-hidden">
+        {/* Patient Identity Header */}
+        <div className="p-4 sm:p-8 space-y-4 sm:space-y-6">
+          {/* Name Row */}
+          <div className="space-y-2.5">
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0 flex-1">
+                <h1 className="text-xl sm:text-4xl font-black text-black font-sans leading-tight truncate">
+                  {activePatient.name}
+                </h1>
+                <span className="inline-block text-[10px] sm:text-xs font-mono font-bold text-[#1E54B7] bg-sky-50 px-2 py-0.5 rounded-md mt-1">
+                  {activePatient.id}
+                </span>
+              </div>
               {latestScan && (
-                <DualCodedBadge stage={latestScan.detection.stage} size="sm" showDetails />
+                <div className="shrink-0">
+                  <DualCodedBadge stage={latestScan.detection.stage} size="sm" showDetails />
+                </div>
               )}
             </div>
 
-            <div className="flex flex-wrap items-center gap-3 text-xs sm:text-sm text-gray-600 font-medium">
-              <span>Age: <strong className="text-black font-bold">{activePatient.age}</strong> ({activePatient.gender})</span>
-              <span>•</span>
-              <span>Diabetes Duration: <strong className="text-black font-bold">{activePatient.diabetes_duration} Years</strong></span>
+            {/* Demographics — clean stacked rows on mobile */}
+            <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] sm:text-sm text-gray-500 font-medium">
+              <span className="inline-flex items-center gap-1">
+                <User className="w-3 h-3 text-gray-400" />
+                <strong className="text-black">{activePatient.age}</strong>, {activePatient.gender}
+              </span>
+              <span className="inline-flex items-center gap-1">
+                <Clock className="w-3 h-3 text-gray-400" />
+                Diabetes: <strong className="text-black">{activePatient.diabetes_duration}y</strong>
+              </span>
               {activePatient.phone && (
-                <>
-                  <span>•</span>
-                  <span className="flex items-center gap-1"><Phone className="w-3.5 h-3.5 text-[#1E54B7]" /> {activePatient.phone}</span>
-                </>
+                <span className="inline-flex items-center gap-1">
+                  <Phone className="w-3 h-3 text-[#1E54B7]" />
+                  {activePatient.phone}
+                </span>
               )}
               {activePatient.location && (
-                <>
-                  <span>•</span>
-                  <span className="flex items-center gap-1"><MapPin className="w-3.5 h-3.5 text-[#1E54B7]" /> {activePatient.location}</span>
-                </>
+                <span className="inline-flex items-center gap-1">
+                  <MapPin className="w-3 h-3 text-[#1E54B7]" />
+                  {activePatient.location}
+                </span>
               )}
             </div>
           </div>
 
-          {/* Key Glycemic Metrics */}
-          <div className="grid grid-cols-2 gap-3 shrink-0">
-            <div className="p-4 rounded-3xl bg-gray-50 border border-gray-200 text-center min-w-[130px]">
-              <span className="text-[10px] font-black uppercase text-gray-500 block">HbA1c Level</span>
-              <span className="text-3xl font-black text-black font-mono mt-1 block">
+          {/* ── Glycemic Vitals — Card-in-card with proper mobile sizing ── */}
+          <div className="grid grid-cols-2 gap-2 sm:gap-3">
+            <div className="p-3 sm:p-4 rounded-xl sm:rounded-3xl bg-gradient-to-br from-gray-50 to-gray-100/50 border border-gray-200/60">
+              <div className="flex items-center gap-1.5 mb-1">
+                <Heart className="w-3 h-3 text-rose-400" />
+                <span className="text-[9px] sm:text-[10px] font-black uppercase text-gray-500 tracking-wider">HbA1c</span>
+              </div>
+              <span className="text-2xl sm:text-3xl font-black text-black font-mono block leading-none">
                 {activePatient.hba1c}%
               </span>
-              <span className={`text-[10px] font-bold ${activePatient.hba1c >= 8 ? 'text-rose-600' : 'text-amber-700'}`}>
-                {activePatient.hba1c >= 8 ? 'High Glycemic Risk' : 'Borderline Managed'}
+              <span className={`text-[9px] sm:text-[10px] font-bold mt-1 block ${activePatient.hba1c >= 8 ? 'text-rose-600' : 'text-amber-600'}`}>
+                {activePatient.hba1c >= 8 ? 'High Risk' : 'Managed'}
               </span>
             </div>
 
-            <div className="p-4 rounded-3xl bg-gray-50 border border-gray-200 text-center min-w-[130px]">
-              <span className="text-[10px] font-black uppercase text-gray-500 block">Fasting Glucose</span>
-              <span className="text-3xl font-black text-black font-mono mt-1 block">
+            <div className="p-3 sm:p-4 rounded-xl sm:rounded-3xl bg-gradient-to-br from-gray-50 to-gray-100/50 border border-gray-200/60">
+              <div className="flex items-center gap-1.5 mb-1">
+                <Droplets className="w-3 h-3 text-blue-400" />
+                <span className="text-[9px] sm:text-[10px] font-black uppercase text-gray-500 tracking-wider">Glucose</span>
+              </div>
+              <span className="text-2xl sm:text-3xl font-black text-black font-mono block leading-none">
                 {activePatient.sugar_level}
               </span>
-              <span className="text-[10px] font-bold text-gray-500">mg / dL</span>
+              <span className="text-[9px] sm:text-[10px] font-bold text-gray-500 mt-1 block">mg/dL fasting</span>
             </div>
           </div>
-        </div>
 
-        {activePatient.notes && (
-          <div className="p-4 rounded-2xl bg-sky-50 border border-sky-100 text-xs sm:text-sm text-gray-800 flex items-start gap-3">
-            <FileText className="w-4 h-4 text-[#1E54B7] shrink-0 mt-0.5" />
-            <div>
-              <strong className="text-black block mb-0.5">Clinical Case Notes:</strong>
-              {activePatient.notes}
+          {/* Clinical Notes — collapsible feel */}
+          {activePatient.notes && (
+            <div className="p-3 sm:p-4 rounded-xl sm:rounded-2xl bg-sky-50/80 border border-sky-100 text-[11px] sm:text-sm text-gray-700 flex items-start gap-2.5">
+              <FileText className="w-3.5 h-3.5 text-[#1E54B7] shrink-0 mt-0.5" />
+              <div className="min-w-0">
+                <strong className="text-black text-[11px] sm:text-xs block mb-0.5">Notes</strong>
+                <p className="leading-relaxed">{activePatient.notes}</p>
+              </div>
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
-      {/* View Switcher Tabs: Longitudinal Timeline vs Individual Scan Archive */}
-      <div className="flex items-center gap-3">
+      {/* ═══ View Switcher — Short mobile labels ═══ */}
+      <div className="flex items-center gap-2 overflow-x-auto no-scrollbar -mx-1 px-1">
         <button
           onClick={() => setActiveTab('timeline')}
-          className={`flex items-center gap-2 px-6 py-3 rounded-full font-bold text-xs uppercase tracking-wider transition-all cursor-pointer ${
+          className={`flex items-center gap-1.5 px-4 sm:px-6 py-2.5 sm:py-3 rounded-full font-bold text-[11px] sm:text-xs uppercase tracking-wider transition-all cursor-pointer whitespace-nowrap shrink-0 ${
             activeTab === 'timeline'
               ? 'bg-white text-black shadow-lg scale-105'
               : 'bg-white/20 hover:bg-white/30 text-white backdrop-blur-md border border-white/30'
           }`}
         >
-          <Activity className="w-4 h-4" />
-          <span>Longitudinal Trajectory & Triage</span>
+          <Activity className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+          <span className="hidden sm:inline">Longitudinal Trajectory & Triage</span>
+          <span className="sm:hidden">Trajectory</span>
         </button>
 
         <button
           onClick={() => setActiveTab('archive')}
-          className={`flex items-center gap-2 px-6 py-3 rounded-full font-bold text-xs uppercase tracking-wider transition-all cursor-pointer ${
+          className={`flex items-center gap-1.5 px-4 sm:px-6 py-2.5 sm:py-3 rounded-full font-bold text-[11px] sm:text-xs uppercase tracking-wider transition-all cursor-pointer whitespace-nowrap shrink-0 ${
             activeTab === 'archive'
               ? 'bg-white text-black shadow-lg scale-105'
               : 'bg-white/20 hover:bg-white/30 text-white backdrop-blur-md border border-white/30'
           }`}
         >
-          <History className="w-4 h-4" />
-          <span>Diagnostic Scan Archive ({scans.length})</span>
+          <History className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+          <span className="hidden sm:inline">Diagnostic Scan Archive ({scans.length})</span>
+          <span className="sm:hidden">Scans ({scans.length})</span>
         </button>
       </div>
 
-      {/* Main Longitudinal Trajectory Content */}
+      {/* ═══ Main Content Area ═══ */}
       {activeTab === 'timeline' ? (
-        <div className="p-7 sm:p-8 bg-white text-black rounded-[36px] shadow-2xl border-4 border-white space-y-6">
+        <div className="p-4 sm:p-8 bg-white text-black rounded-2xl sm:rounded-[36px] shadow-2xl border border-gray-100 sm:border-4 sm:border-white space-y-4 sm:space-y-6">
           <div>
-            <h2 className="text-xl sm:text-2xl font-bold text-black flex items-center gap-2 font-sans">
-              <Activity className="w-6 h-6 text-[#1E54B7]" />
-              Longitudinal Retinal Progression & Triage
+            <h2 className="text-lg sm:text-2xl font-bold text-black flex items-center gap-2 font-sans">
+              <Activity className="w-5 h-5 sm:w-6 sm:h-6 text-[#1E54B7]" />
+              <span className="hidden sm:inline">Longitudinal Retinal Progression & Triage</span>
+              <span className="sm:hidden">Progression & Triage</span>
             </h2>
-            <p className="text-xs sm:text-sm text-gray-500 mt-1">
-              Deterministic progression risk estimation, microvascular trajectory, and specialist referral triage
+            <p className="text-[11px] sm:text-sm text-gray-500 mt-1 leading-relaxed">
+              <span className="hidden sm:inline">Deterministic progression risk estimation, microvascular trajectory, and specialist referral triage</span>
+              <span className="sm:hidden">Risk progression and specialist referral triage</span>
             </p>
           </div>
 
@@ -255,68 +284,72 @@ export const PatientDetailView: React.FC = () => {
           />
         </div>
       ) : (
-        /* Diagnostic Scan Archive */
-        <div className="p-7 sm:p-8 bg-white text-black rounded-[36px] shadow-2xl border-4 border-white space-y-6">
+        /* ═══ Diagnostic Scan Archive ═══ */
+        <div className="p-4 sm:p-8 bg-white text-black rounded-2xl sm:rounded-[36px] shadow-2xl border border-gray-100 sm:border-4 sm:border-white space-y-4 sm:space-y-6">
           <div>
-            <h2 className="text-xl sm:text-2xl font-bold text-black flex items-center gap-2 font-sans">
-              <History className="w-6 h-6 text-[#1E54B7]" />
-              Historical Scan Records
+            <h2 className="text-lg sm:text-2xl font-bold text-black flex items-center gap-2 font-sans">
+              <History className="w-5 h-5 sm:w-6 sm:h-6 text-[#1E54B7]" />
+              <span className="hidden sm:inline">Historical Scan Records</span>
+              <span className="sm:hidden">Scan History</span>
             </h2>
-            <p className="text-xs sm:text-sm text-gray-500 mt-1">
-              Complete archives of AI heatmap activations, segmented vasculature, and full clinical reports
+            <p className="text-[11px] sm:text-sm text-gray-500 mt-1">
+              <span className="hidden sm:inline">Complete archives of AI heatmap activations, segmented vasculature, and full clinical reports</span>
+              <span className="sm:hidden">AI heatmaps, vasculature & clinical reports</span>
             </p>
           </div>
 
           {scans.length === 0 ? (
-            <div className="p-8 text-center bg-gray-50 rounded-2xl border border-gray-200 text-gray-500 text-sm">
-              No historical scans recorded for this patient yet.
+            <div className="p-6 sm:p-8 text-center bg-gray-50 rounded-xl sm:rounded-2xl border border-gray-200 text-gray-500 text-sm">
+              No historical scans recorded yet.
             </div>
           ) : (
-            <div className="space-y-6">
+            <div className="space-y-4 sm:space-y-6">
               {scans.map((scan) => {
                 const meta = DR_STAGES[scan.detection.stage];
                 return (
                   <div
                     key={scan.analysis_id}
-                    className="p-6 bg-gray-50/70 border border-gray-200 hover:border-[#1E54B7] hover:bg-white rounded-3xl space-y-4 transition-all shadow-sm"
+                    className="p-3.5 sm:p-6 bg-gray-50/70 border border-gray-200 hover:border-[#1E54B7] hover:bg-white rounded-xl sm:rounded-3xl space-y-3 sm:space-y-4 transition-all shadow-sm"
                   >
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    {/* Scan Header — stacked on mobile */}
+                    <div className="space-y-2 sm:space-y-0 sm:flex sm:items-center sm:justify-between sm:gap-3">
                       <div>
-                        <div className="flex items-center gap-3">
-                          <span className="text-xs font-mono font-bold text-gray-600 flex items-center gap-1.5">
-                            <Calendar className="w-4 h-4 text-[#1E54B7]" />
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-[10px] sm:text-xs font-mono font-bold text-gray-600 flex items-center gap-1">
+                            <Calendar className="w-3.5 h-3.5 text-[#1E54B7]" />
                             {scan.scan_date}
                           </span>
-                          <span className="text-xs text-gray-400 font-mono">
+                          <span className="text-[10px] text-gray-400 font-mono hidden sm:inline">
                             ({scan.analysis_id})
                           </span>
                         </div>
-                        <h3 className="text-lg font-bold text-black mt-1">
-                          Diagnostic Result: {meta.name}
+                        <h3 className="text-sm sm:text-lg font-bold text-black mt-0.5">
+                          {meta.name}
                         </h3>
                       </div>
 
                       <div className="flex items-center gap-2">
                         <button
                           onClick={() => handleInspectScan(scan)}
-                          className="px-4 py-2 rounded-full bg-sky-100 hover:bg-[#1E54B7] text-[#1E54B7] hover:text-white text-xs font-black transition-all cursor-pointer"
+                          className="flex-1 sm:flex-none px-3 sm:px-4 py-2 rounded-full bg-sky-100 hover:bg-[#1E54B7] text-[#1E54B7] hover:text-white text-[11px] sm:text-xs font-black transition-all cursor-pointer text-center"
                         >
-                          View Full AI Report →
+                          <span className="hidden sm:inline">View Full AI Report →</span>
+                          <span className="sm:hidden">AI Report →</span>
                         </button>
                         <button
                           onClick={() => generateLargePrintPDF(scan, activePatient)}
-                          className="p-2 rounded-full bg-white hover:bg-gray-100 text-gray-700 border border-gray-200 shadow-sm cursor-pointer"
+                          className="p-2 rounded-full bg-white hover:bg-gray-100 text-gray-700 border border-gray-200 shadow-sm cursor-pointer shrink-0"
                           title="Download Patient PDF"
                         >
-                          <FileDown className="w-4 h-4" />
+                          <FileDown className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                         </button>
                       </div>
                     </div>
 
-                    {/* Scan Triptych Thumbnail Preview */}
-                    <div className="grid grid-cols-3 gap-3">
+                    {/* Scan Images — 3-up grid with smaller gap on mobile */}
+                    <div className="grid grid-cols-3 gap-1.5 sm:gap-3">
                       <div
-                        className="aspect-square rounded-2xl bg-black overflow-hidden border-2 border-white shadow-md cursor-pointer"
+                        className="aspect-square rounded-lg sm:rounded-2xl bg-black overflow-hidden border border-white/50 sm:border-2 sm:border-white shadow-md cursor-pointer"
                         onClick={() => setSelectedScanForLightbox(scan)}
                       >
                         <img
@@ -326,7 +359,7 @@ export const PatientDetailView: React.FC = () => {
                         />
                       </div>
                       <div
-                        className="aspect-square rounded-2xl bg-black overflow-hidden border-2 border-white shadow-md cursor-pointer"
+                        className="aspect-square rounded-lg sm:rounded-2xl bg-black overflow-hidden border border-white/50 sm:border-2 sm:border-white shadow-md cursor-pointer"
                         onClick={() => setSelectedScanForLightbox(scan)}
                       >
                         <img
@@ -336,7 +369,7 @@ export const PatientDetailView: React.FC = () => {
                         />
                       </div>
                       <div
-                        className="aspect-square rounded-2xl bg-black overflow-hidden border-2 border-white shadow-md cursor-pointer"
+                        className="aspect-square rounded-lg sm:rounded-2xl bg-black overflow-hidden border border-white/50 sm:border-2 sm:border-white shadow-md cursor-pointer"
                         onClick={() => setSelectedScanForLightbox(scan)}
                       >
                         <img
@@ -347,14 +380,14 @@ export const PatientDetailView: React.FC = () => {
                       </div>
                     </div>
 
-                    {/* Clinical Summary & Microvascular Vitals */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs text-gray-700 pt-3 border-t border-gray-200">
+                    {/* Clinical Summary — stacked on mobile */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3 text-[11px] sm:text-xs text-gray-700 pt-2.5 sm:pt-3 border-t border-gray-200">
                       <div>
-                        <span className="text-gray-500 font-bold block">AI Plain Language Note:</span>
-                        <p className="mt-0.5 line-clamp-2">{scan.report.current_diagnosis.plain_language}</p>
+                        <span className="text-gray-500 font-bold block text-[10px] sm:text-xs">AI Note:</span>
+                        <p className="mt-0.5 line-clamp-2 leading-relaxed">{scan.report.current_diagnosis.plain_language}</p>
                       </div>
-                      <div className="space-y-1 font-mono">
-                        <div>Vessel Density: <strong className="text-black">{scan.vessel_stats.vessel_density_percent}%</strong></div>
+                      <div className="flex gap-3 sm:block sm:space-y-1 font-mono text-[10px] sm:text-xs">
+                        <div>Density: <strong className="text-black">{scan.vessel_stats.vessel_density_percent}%</strong></div>
                         <div>Urgency: <strong className="text-amber-800">{scan.report.urgency}</strong></div>
                       </div>
                     </div>

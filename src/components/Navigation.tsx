@@ -139,7 +139,7 @@ export const Navigation: React.FC = () => {
 
       {/* Mobile & Tablet Bottom Sticky Navigation Bar with Safe Area Support */}
       <nav
-        className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-[#619FE8]/95 backdrop-blur-2xl border-t border-white/30 px-2 sm:px-4 py-2 pb-safe flex items-center justify-around shadow-2xl"
+        className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-[#619FE8]/95 backdrop-blur-2xl border-t border-white/20 px-1 sm:px-3 py-1.5 pb-safe flex items-center justify-around shadow-2xl"
         role="navigation"
         aria-label="Mobile Clinical Navigation"
       >
@@ -152,7 +152,7 @@ export const Navigation: React.FC = () => {
                 setIsMoreOpen(false);
                 setActiveView(item.id);
               }}
-              className={`relative flex flex-col items-center justify-center min-w-[62px] xs:min-w-[68px] min-h-[48px] py-1 px-2 rounded-2xl transition-all ${
+              className={`relative flex flex-col items-center justify-center min-w-[52px] sm:min-w-[64px] min-h-[46px] py-1 px-1.5 rounded-xl sm:rounded-2xl transition-all ${
                 isActive
                   ? 'text-[#1E54B7] bg-white font-black shadow-lg scale-105'
                   : 'text-white/80 hover:text-white active:scale-95'
@@ -160,14 +160,14 @@ export const Navigation: React.FC = () => {
               aria-current={isActive ? 'page' : undefined}
             >
               <div className="relative">
-                {item.icon}
+                {React.cloneElement(item.icon as React.ReactElement, { className: 'w-[18px] h-[18px] sm:w-5 sm:h-5' })}
                 {item.id === 'batch-screening' && batchQueue.length > 0 && (
-                  <span className="absolute -top-1.5 -right-2.5 w-4 h-4 rounded-full bg-[#E1FA4A] text-black text-[9px] font-mono font-black flex items-center justify-center shadow-sm">
+                  <span className="absolute -top-1 -right-2 w-3.5 h-3.5 rounded-full bg-[#E1FA4A] text-black text-[8px] font-mono font-black flex items-center justify-center shadow-sm">
                     {batchQueue.length}
                   </span>
                 )}
               </div>
-              <span className="text-[10px] xs:text-[11px] mt-0.5 font-bold tracking-tight whitespace-nowrap">
+              <span className="text-[9px] sm:text-[11px] mt-0.5 font-bold tracking-tight whitespace-nowrap">
                 {item.shortLabel}
               </span>
             </button>
@@ -177,7 +177,7 @@ export const Navigation: React.FC = () => {
         {/* 5th Button: More / System Drawer for mobile */}
         <button
           onClick={() => setIsMoreOpen((prev) => !prev)}
-          className={`relative flex flex-col items-center justify-center min-w-[62px] xs:min-w-[68px] min-h-[48px] py-1 px-2 rounded-2xl transition-all ${
+          className={`relative flex flex-col items-center justify-center min-w-[52px] sm:min-w-[64px] min-h-[46px] py-1 px-1.5 rounded-xl sm:rounded-2xl transition-all ${
             isMoreOpen || activeView === 'admin'
               ? 'text-[#1E54B7] bg-[#E1FA4A] font-black shadow-lg scale-105'
               : 'text-white/80 hover:text-white active:scale-95'
@@ -185,8 +185,8 @@ export const Navigation: React.FC = () => {
           aria-label="More Navigation Options"
           aria-expanded={isMoreOpen}
         >
-          <MoreHorizontal className="w-5 h-5" />
-          <span className="text-[10px] xs:text-[11px] mt-0.5 font-bold tracking-tight whitespace-nowrap">
+          <MoreHorizontal className="w-[18px] h-[18px] sm:w-5 sm:h-5" />
+          <span className="text-[9px] sm:text-[11px] mt-0.5 font-bold tracking-tight whitespace-nowrap">
             More
           </span>
         </button>
