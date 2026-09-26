@@ -28,15 +28,38 @@
     <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400;1,700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
   </head>
   <body class="antialiased bg-[#0B0F19] text-[#F8FAFC]">
-    <div id="root"></div>
+    <div id="root">
+      <!-- Inline loader: visible only until React mounts and replaces this content -->
+      <div id="app-loader" style="display:flex;align-items:center;justify-content:center;flex-direction:column;height:100vh;gap:16px;">
+        <div style="width:40px;height:40px;border:3px solid rgba(255,255,255,0.15);border-top-color:#619FE8;border-radius:50%;animation:spin 0.8s linear infinite;"></div>
+        <div style="font-family:Inter,system-ui,sans-serif;font-size:13px;font-weight:600;color:rgba(255,255,255,0.5);letter-spacing:0.05em;">LOADING DRISHTIAI</div>
+      </div>
+      <style>@keyframes spin{to{transform:rotate(360deg)}}</style>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
 
-    <!-- Service Worker Registration -->
+    <!-- Service Worker Registration with Auto-Update -->
     <script>
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
           navigator.serviceWorker.register('/sw.js').then(
-            (reg) => console.log('[DrishtiAI] SW registered:', reg.scope),
+            (reg) => {
+              console.log('[DrishtiAI] SW registered:', reg.scope);
+              // Check for updates every 60s
+              setInterval(() => reg.update(), 60000);
+              // When a new SW takes over, reload for fresh assets
+              reg.addEventListener('updatefound', () => {
+                const newWorker = reg.installing;
+                if (newWorker) {
+                  newWorker.addEventListener('statechange', () => {
+                    if (newWorker.state === 'activated' && navigator.serviceWorker.controller) {
+                      console.log('[DrishtiAI] New SW activated — reloading for fresh assets');
+                      window.location.reload();
+                    }
+                  });
+                }
+              });
+            },
             (err) => console.warn('[DrishtiAI] SW registration failed:', err)
           );
         });
