@@ -42,6 +42,7 @@ import { ImageLightboxModal } from './ImageLightboxModal';
 import { DoctorReviewSection } from './DoctorReviewSection';
 import { MedicalRAGDrawer } from './MedicalRAGDrawer';
 import { BookOpen } from 'lucide-react';
+import { HourglassLoader } from './HourglassLoader';
 
 const DEMO_SCENARIOS = [
   { id: 'NORMAL', label: '1. Normal Fundus', stage: 'Stage 0', category: 'Standard', desc: 'Annual recall' },
@@ -763,9 +764,8 @@ export const NewScanView: React.FC = () => {
       ────────────────────────────────────────────────────────────── */}
       {isAnalyzing && (
         <div className="p-8 sm:p-12 bg-white text-black border-4 border-white rounded-[36px] shadow-2xl text-center max-w-2xl mx-auto space-y-8 animate-fadeIn">
-          <div className="relative flex items-center justify-center">
-            <div className="w-20 h-20 rounded-full border-4 border-gray-100 border-t-[#1E54B7] animate-spin" />
-            <Microscope className="absolute w-8 h-8 text-[#1E54B7]" />
+          <div className="relative flex items-center justify-center py-2">
+            <HourglassLoader size={72} theme="medical-blue" />
           </div>
 
           <div className="space-y-2">
