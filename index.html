@@ -26,6 +26,35 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400;1,700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+
+    <!-- CRITICAL: Nuke stale SW caches immediately before any fetch can be intercepted.
+         This runs BLOCKING in <head> so the old SW can't serve stale assets. -->
+    <script>
+      (function() {
+        var SW_VERSION = 'v3';
+        var lastVersion = localStorage.getItem('drishti_sw_ver');
+        if (lastVersion !== SW_VERSION && 'serviceWorker' in navigator) {
+          // Version mismatch — purge everything
+          localStorage.setItem('drishti_sw_ver', SW_VERSION);
+          // Unregister all service workers
+          navigator.serviceWorker.getRegistrations().then(function(regs) {
+            var didUnregister = false;
+            regs.forEach(function(reg) { reg.unregister(); didUnregister = true; });
+            // Purge all caches
+            if ('caches' in window) {
+              caches.keys().then(function(keys) {
+                keys.forEach(function(key) { caches.delete(key); });
+              });
+            }
+            // If we actually unregistered an old SW, hard-reload to get fresh content
+            if (didUnregister) {
+              console.log('[DrishtiAI] Purged stale SW — reloading fresh');
+              location.reload();
+            }
+          });
+        }
+      })();
+    </script>
   </head>
   <body class="antialiased bg-[#0B0F19] text-[#F8FAFC]">
     <div id="root">
