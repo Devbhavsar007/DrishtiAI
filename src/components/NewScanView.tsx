@@ -598,7 +598,7 @@ export const NewScanView: React.FC = () => {
                         {preset.clinicalNote}
                       </p>
                       <p className="text-[10px] text-gray-500 font-mono mt-0.5">
-                        {preset.samplePatientAge}y • HbA1c {preset.hba1c}%
+                        {preset.age}y • HbA1c {preset.hba1c}%
                       </p>
                     </button>
                   );

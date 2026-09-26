@@ -8,6 +8,7 @@ import {
   Zap,
   ArrowRight,
   Check,
+  Download,
   Globe,
   Play,
   Pause,
@@ -56,10 +57,18 @@ export const LandingPageView: React.FC = () => {
   const [activeExplainTab, setActiveExplainTab] = useState<'fundus' | 'vessels' | 'heatmap'>('fundus');
   const [simulatedLang, setSimulatedLang] = useState<'en' | 'hi' | 'gu'>('en');
   const [copiedLink, setCopiedLink] = useState<boolean>(false);
+  const [downloadToast, setDownloadToast] = useState<string | null>(null);
   const [openFaq, setOpenFaq] = useState<number | null>(0);
   const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
   const navRef = React.useRef<HTMLDivElement | null>(null);
   const phoneRef = React.useRef<HTMLDivElement | null>(null);
+
+  const handleDownloadApk = (platformName: string) => {
+    setDownloadToast(`Starting download: DrishtiAI.apk (5.4 MB) • ${platformName}`);
+    setTimeout(() => {
+      setDownloadToast(null);
+    }, 4500);
+  };
 
   const selectedCase = PRESET_FUNDUS_CASES[2]; // Moderate NPDR default
   const stageMeta = DR_STAGES[selectedCase.stage];
@@ -226,28 +235,34 @@ export const LandingPageView: React.FC = () => {
           {/* Right Cluster — store badges + language + launch (PlanIA layout) */}
           <div className="flex items-center gap-2 sm:gap-2.5">
             {/* Google Play Badge */}
-            <button
-              aria-label="Get it on Google Play"
-              className="hidden sm:flex items-center gap-2.5 h-11 pl-3 pr-3.5 rounded-[9px] bg-white/40 hover:bg-white/60 backdrop-blur-xl border border-white/50 shadow-sm hover:scale-[1.03] active:scale-[0.98] transition-all cursor-pointer"
+            <a
+              href="/DrishtiAI.apk"
+              download="DrishtiAI.apk"
+              onClick={() => handleDownloadApk('Google Play')}
+              aria-label="Download DrishtiAI Android APK (Google Play)"
+              className="hidden sm:flex items-center gap-2.5 h-11 pl-3 pr-3.5 rounded-[9px] bg-white/40 hover:bg-white/60 backdrop-blur-xl border border-white/50 shadow-sm hover:scale-[1.03] active:scale-[0.98] transition-all cursor-pointer no-underline text-inherit"
             >
               <Play className="w-5 h-5 fill-black text-black shrink-0" />
               <span className="hidden lg:flex flex-col items-start leading-none text-left">
                 <span className="text-[8px] font-medium uppercase tracking-wide text-black/60">Get it on</span>
                 <span className="text-[14px] font-medium tracking-[-0.01em] mt-[3px] text-slate-900">Google Play</span>
               </span>
-            </button>
+            </a>
 
             {/* App Store Badge */}
-            <button
-              aria-label="Download on the App Store"
-              className="hidden sm:flex items-center gap-2.5 h-11 pl-3 pr-3.5 rounded-[9px] bg-black/55 hover:bg-black/70 backdrop-blur-xl border border-white/25 text-white shadow-sm hover:scale-[1.03] active:scale-[0.98] transition-all cursor-pointer"
+            <a
+              href="/DrishtiAI.apk"
+              download="DrishtiAI.apk"
+              onClick={() => handleDownloadApk('App Store')}
+              aria-label="Download DrishtiAI Mobile App (App Store)"
+              className="hidden sm:flex items-center gap-2.5 h-11 pl-3 pr-3.5 rounded-[9px] bg-black/55 hover:bg-black/70 backdrop-blur-xl border border-white/25 text-white shadow-sm hover:scale-[1.03] active:scale-[0.98] transition-all cursor-pointer no-underline"
             >
               <AppleIcon className="w-[22px] h-[22px] shrink-0" />
               <span className="hidden lg:flex flex-col items-start leading-none text-left">
                 <span className="text-[8px] font-medium uppercase tracking-wide text-white/70">Download on the</span>
                 <span className="text-[14px] font-medium tracking-[-0.01em] mt-[3px]">App Store</span>
               </span>
-            </button>
+            </a>
 
             {/* Language Toggle (PlanIA "Br"-style button) */}
             <button
@@ -403,6 +418,39 @@ export const LandingPageView: React.FC = () => {
                 <span>Start Free Retinal Scan</span>
               </button>
 
+              {/* Mobile Drawer APK Download Buttons */}
+              <div className="pt-2">
+                <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-slate-400 pb-1.5 text-center">
+                  Download Mobile App (APK 5.4MB)
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <a
+                    href="/DrishtiAI.apk"
+                    download="DrishtiAI.apk"
+                    onClick={() => {
+                      setMobileMenuOpen(false);
+                      handleDownloadApk('Google Play');
+                    }}
+                    className="flex items-center justify-center gap-2 py-2 px-2.5 rounded-[9px] bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-900 text-xs font-semibold transition-all cursor-pointer no-underline"
+                  >
+                    <Play className="w-3.5 h-3.5 fill-black text-black shrink-0" />
+                    <span>Google Play</span>
+                  </a>
+                  <a
+                    href="/DrishtiAI.apk"
+                    download="DrishtiAI.apk"
+                    onClick={() => {
+                      setMobileMenuOpen(false);
+                      handleDownloadApk('App Store');
+                    }}
+                    className="flex items-center justify-center gap-2 py-2 px-2.5 rounded-[9px] bg-black text-white hover:bg-slate-800 text-xs font-semibold transition-all cursor-pointer no-underline"
+                  >
+                    <AppleIcon className="w-3.5 h-3.5 shrink-0" />
+                    <span>App Store</span>
+                  </a>
+                </div>
+              </div>
+
               <div className="text-center text-[10px] text-slate-400 font-mono pt-0.5">
                 Gemma-4 Vision • WCAG 2.2 AAA
               </div>
@@ -443,28 +491,34 @@ export const LandingPageView: React.FC = () => {
             </button>
 
             {/* Google Play Badge */}
-            <button
-              aria-label="Get it on Google Play"
-              className="flex items-center gap-3 h-[49px] px-4 rounded-[9px] bg-white hover:bg-gray-50 border border-black/10 text-black shadow-md hover:scale-[1.03] transition-all cursor-pointer"
+            <a
+              href="/DrishtiAI.apk"
+              download="DrishtiAI.apk"
+              onClick={() => handleDownloadApk('Google Play')}
+              aria-label="Download DrishtiAI Android APK (Google Play)"
+              className="flex items-center gap-3 h-[49px] px-4 rounded-[9px] bg-white hover:bg-gray-50 border border-black/10 text-black shadow-md hover:scale-[1.03] transition-all cursor-pointer no-underline"
             >
               <Play className="w-6 h-6 fill-black text-black" />
               <span className="flex flex-col items-start leading-none">
                 <span className="text-[9px] font-medium uppercase tracking-wide text-black/60">Get it on</span>
                 <span className="text-[17px] font-semibold tracking-[-0.02em] mt-0.5">Google Play</span>
               </span>
-            </button>
+            </a>
 
             {/* App Store Badge */}
-            <button
-              aria-label="Download on the App Store"
-              className="flex items-center gap-3 h-[49px] px-4 rounded-[9px] bg-black hover:bg-gray-900 border border-black text-white shadow-md hover:scale-[1.03] transition-all cursor-pointer"
+            <a
+              href="/DrishtiAI.apk"
+              download="DrishtiAI.apk"
+              onClick={() => handleDownloadApk('App Store')}
+              aria-label="Download DrishtiAI Mobile App (App Store)"
+              className="flex items-center gap-3 h-[49px] px-4 rounded-[9px] bg-black hover:bg-gray-900 border border-black text-white shadow-md hover:scale-[1.03] transition-all cursor-pointer no-underline"
             >
               <AppleIcon className="w-6 h-6" />
               <span className="flex flex-col items-start leading-none">
                 <span className="text-[9px] font-medium uppercase tracking-wide text-white/70">Download on the</span>
                 <span className="text-[17px] font-semibold tracking-[-0.02em] mt-0.5">App Store</span>
               </span>
-            </button>
+            </a>
           </div>
         </div>
 
@@ -1302,6 +1356,35 @@ export const LandingPageView: React.FC = () => {
                 </>
               )}
             </button>
+
+            {/* Direct APK Downloads in Footer */}
+            <a
+              href="/DrishtiAI.apk"
+              download="DrishtiAI.apk"
+              onClick={() => handleDownloadApk('Google Play')}
+              aria-label="Download DrishtiAI Android APK (Google Play)"
+              className="flex items-center gap-2.5 h-[49px] px-4 rounded-[9px] bg-white hover:bg-gray-100 text-black shadow-md hover:scale-[1.03] transition-all cursor-pointer no-underline text-xs font-semibold"
+            >
+              <Play className="w-4 h-4 fill-black text-black shrink-0" />
+              <span className="flex flex-col items-start leading-none">
+                <span className="text-[8px] font-medium uppercase text-black/60">Get it on</span>
+                <span className="text-[13px] font-semibold tracking-tight mt-0.5">Google Play</span>
+              </span>
+            </a>
+
+            <a
+              href="/DrishtiAI.apk"
+              download="DrishtiAI.apk"
+              onClick={() => handleDownloadApk('App Store')}
+              aria-label="Download DrishtiAI Mobile App (App Store)"
+              className="flex items-center gap-2.5 h-[49px] px-4 rounded-[9px] bg-black hover:bg-gray-900 border border-white/20 text-white shadow-md hover:scale-[1.03] transition-all cursor-pointer no-underline text-xs font-semibold"
+            >
+              <AppleIcon className="w-4 h-4 shrink-0" />
+              <span className="flex flex-col items-start leading-none">
+                <span className="text-[8px] font-medium uppercase text-white/70">Download on the</span>
+                <span className="text-[13px] font-semibold tracking-tight mt-0.5">App Store</span>
+              </span>
+            </a>
           </div>
         </div>
 
@@ -1334,6 +1417,20 @@ export const LandingPageView: React.FC = () => {
           </div>
         </div>
       </footer>
+
+      {/* Download Feedback Toast */}
+      {downloadToast && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-5 py-3 rounded-full bg-slate-900/95 text-white border border-emerald-500/40 shadow-[0_10px_40px_rgba(0,0,0,0.5)] backdrop-blur-xl animate-fade-in text-xs sm:text-sm font-semibold"
+        >
+          <div className="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
+            <Download className="w-3.5 h-3.5 stroke-[2.5]" />
+          </div>
+          <span>{downloadToast}</span>
+        </div>
+      )}
     </div>
   );
 };
